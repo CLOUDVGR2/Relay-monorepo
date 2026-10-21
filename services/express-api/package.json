@@ -4,7 +4,7 @@
   "description": "Express.js backend for Relay chat application",
   "main": "src/server.js",
   "scripts": {
-    "dev": "nodemon src/bootstrap.js",
+    "dev": "node --watch src/bootstrap.js",
     "start": "node src/bootstrap.js",
     "build": "echo 'No build step required for Node.js backend'",
     "test:integration": "node --test tests/*.test.js"
@@ -41,7 +41,6 @@
     "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.7",
     "socket.io-client": "^4.8.4"
   },
   "overrides": {}
