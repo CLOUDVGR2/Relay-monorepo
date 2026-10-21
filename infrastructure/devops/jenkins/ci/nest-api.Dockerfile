@@ -11,4 +11,7 @@ RUN DATABASE_URL="postgresql://build:build@localhost:5432/build" npx prisma gene
 
 RUN npm run lint && npm run build
 
+RUN chown -R node:node /app
+USER node
+
 CMD ["npm", "test"]

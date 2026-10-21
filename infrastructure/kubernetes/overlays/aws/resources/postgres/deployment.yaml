@@ -17,9 +17,25 @@ spec:
     spec:
       securityContext:
         fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: postgres-tmp
+        emptyDir: {}
+      - name: postgres-run
+        emptyDir: {}
       containers:
         - name: postgres
           image: pgvector/pgvector:pg17
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: postgres
               containerPort: 5432
@@ -36,6 +52,10 @@ spec:
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
+            - name: postgres-tmp
+              mountPath: /tmp
+            - name: postgres-run
+              mountPath: /var/run/postgresql
           resources:
             requests:
               memory: 256Mi

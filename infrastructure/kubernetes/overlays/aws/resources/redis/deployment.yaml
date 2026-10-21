@@ -17,19 +17,31 @@ spec:
     spec:
       securityContext:
         fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: redis-tmp
+        emptyDir: {}
       containers:
         - name: redis
           image: redis:7-alpine
-          args:
-            - redis-server
-            - --appendonly
-            - "yes"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: redis
               containerPort: 6379
           volumeMounts:
             - name: redis-data
               mountPath: /data
+            - name: redis-tmp
+              mountPath: /tmp
           resources:
             requests:
               memory: 128Mi

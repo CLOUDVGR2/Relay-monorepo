@@ -7,4 +7,7 @@ RUN npm ci
 
 COPY . .
 
+RUN chown -R node:node /app
+USER node
+
 CMD ["npm", "run", "test:integration"]
