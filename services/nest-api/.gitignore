@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Environment variables and secrets
+.env
+.env.*
+
+# Allow an example environment file to be committed.
+!.env.example
+
+# Build output
+dist/
+coverage/
+
+# TypeScript incremental compilation artifacts
+*.tsbuildinfo
+
+# Generated Prisma client and native engine
+src/generated/prisma/
+
+# Logs
+*.log
+
+# Operating system files
+.DS_Store
+
+/generated/prisma/

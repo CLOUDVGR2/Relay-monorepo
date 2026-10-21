@@ -1,0 +1,3 @@
+-- Baseline for the pre-existing shared PostgreSQL database.
+-- The Python AI tables are managed separately by Alembic.
+-- This migration intentionally makes no schema changes.

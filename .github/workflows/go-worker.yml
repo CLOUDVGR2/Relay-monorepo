@@ -1,0 +1,53 @@
+name: Go Worker CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test Go Worker
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: services/jobs-worker
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: services/jobs-worker/go.mod
+          cache-dependency-path: services/jobs-worker/go.sum
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test ./... -count=1
+
+      - name: Run race detector
+        run: go test -race ./... -count=1
+
+      - name: Generate coverage report
+        run: go test -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Display coverage
+        run: go tool cover -func=coverage.out
+
+      - name: Upload coverage report
+        if: always() && hashFiles('services/jobs-worker/coverage.out') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-worker-coverage
+          path: services/jobs-worker/coverage.out
+          if-no-files-found: error
+          retention-days: 14

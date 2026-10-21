@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+spec:
+  template:
+    spec:
+      containers:
+        - name: mongodb
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              $patch: delete
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              $patch: delete
+          livenessProbe:
+            timeoutSeconds: 5
+            exec:
+              command:
+                - sh
+                - -ec
+                - "mongosh --quiet --eval 'db.adminCommand({ping: 1}).ok'"
+          readinessProbe:
+            timeoutSeconds: 5
+            exec:
+              command:
+                - sh
+                - -ec
+                - "mongosh --quiet --eval 'db.adminCommand({ping: 1}).ok'"

@@ -1,0 +1,255 @@
+name: Publish Go Worker Image
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-publish:
+    name: Test and Publish Go Worker
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    services:
+      rabbitmq:
+        image: rabbitmq:4-management
+        env:
+          RABBITMQ_DEFAULT_USER: testuser
+          RABBITMQ_DEFAULT_PASS: testpass
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: services/jobs-worker/go.mod
+          cache-dependency-path: services/jobs-worker/go.sum
+
+      - name: Run go vet
+        working-directory: services/jobs-worker
+        run: go vet ./...
+
+      - name: Run tests
+        working-directory: services/jobs-worker
+        env:
+          RABBITMQ_INTEGRATION: "1"
+          RABBITMQ_HOST: localhost:5672
+          RABBITMQ_DEFAULT_USER: testuser
+          RABBITMQ_DEFAULT_PASS: testpass
+        run: go test ./... -count=1
+
+      - name: Run race detector
+        working-directory: services/jobs-worker
+        env:
+          RABBITMQ_INTEGRATION: "1"
+          RABBITMQ_HOST: localhost:5672
+          RABBITMQ_DEFAULT_USER: testuser
+          RABBITMQ_DEFAULT_PASS: testpass
+        run: go test -race ./... -count=1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image for smoke test
+        run: |
+          docker buildx build \
+            --load \
+            --platform linux/amd64 \
+            --tag go-worker-smoke:ci \
+            ./services/jobs-worker
+
+      - name: Smoke test worker with RabbitMQ and Redis
+        env:
+          RABBITMQ_DEFAULT_USER: testuser
+          RABBITMQ_DEFAULT_PASS: testpass
+        run: |
+          set -eu
+
+          docker run -d \
+            --name go-worker-smoke \
+            --network host \
+            --read-only \
+            --security-opt no-new-privileges:true \
+            --cap-drop ALL \
+            --memory 256m \
+            --pids-limit 100 \
+            -e RABBITMQ_HOST=localhost:5672 \
+            -e RABBITMQ_DEFAULT_USER="$RABBITMQ_DEFAULT_USER" \
+            -e RABBITMQ_DEFAULT_PASS="$RABBITMQ_DEFAULT_PASS" \
+            -e REDIS_URL=redis://localhost:6379 \
+            go-worker-smoke:ci
+
+          for attempt in $(seq 1 30); do
+            echo "Waiting for worker startup (attempt ${attempt}/30)..."
+
+            if docker logs go-worker-smoke 2>&1 |
+              grep -q "Go worker connected; waiting for jobs"; then
+              echo "Smoke test passed: worker connected successfully."
+              docker logs go-worker-smoke
+              echo "Worker is ready; keeping it running for the job test."
+              exit 0
+            fi
+
+            if [ "$(docker inspect -f '{{.State.Running}}' go-worker-smoke)" != "true" ]; then
+              echo "Smoke test failed: worker exited unexpectedly."
+              docker logs go-worker-smoke
+              exit 1
+            fi
+
+            sleep 2
+          done
+
+          echo "Smoke test failed: worker did not connect within 60 seconds."
+          docker logs go-worker-smoke
+          exit 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Node.js dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Publish a real test job
+        id: publish-job
+        env:
+          RABBITMQ_HOST: localhost:5672
+          RABBITMQ_DEFAULT_USER: testuser
+          RABBITMQ_DEFAULT_PASS: testpass
+        run: |
+          set -eu
+
+          JOB_ID="$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')"
+          echo "job_id=$JOB_ID" >> "$GITHUB_OUTPUT"
+
+          JOB_ID="$JOB_ID" node <<'NODE'
+          const amqp = require("amqplib");
+
+          async function main() {
+            const user = process.env.RABBITMQ_DEFAULT_USER;
+            const pass = process.env.RABBITMQ_DEFAULT_PASS;
+            const host = process.env.RABBITMQ_HOST;
+            const jobId = process.env.JOB_ID;
+
+            const connection = await amqp.connect(
+              `amqp://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${host}`
+            );
+
+            try {
+              const channel = await connection.createConfirmChannel();
+
+              try {
+                await channel.assertQueue("go.jobs", { durable: true });
+
+                const job = {
+                  id: jobId,
+                  type: "welcome",
+                  message: "GitHub Actions end-to-end test"
+                };
+
+                channel.sendToQueue(
+                  "go.jobs",
+                  Buffer.from(JSON.stringify(job)),
+                  { persistent: true }
+                );
+
+                await channel.waitForConfirms();
+                console.log(`RabbitMQ confirmed test job ${jobId}`);
+              } finally {
+                await channel.close();
+              }
+            } finally {
+              await connection.close();
+            }
+          }
+
+          main().catch((error) => {
+            console.error("Failed to publish test job:", error.message);
+            process.exitCode = 1;
+          });
+          NODE
+
+      - name: Verify the Go worker processed the exact job
+        env:
+          JOB_ID: ${{ steps.publish-job.outputs.job_id }}
+        run: |
+          set -eu
+
+          for attempt in $(seq 1 30); do
+            if docker logs go-worker-smoke 2>&1 |
+              grep -Fq "Job ${JOB_ID} completed successfully"; then
+              echo "End-to-end test passed for job ${JOB_ID}."
+              docker logs go-worker-smoke
+              exit 0
+            fi
+
+            if [ "$(docker inspect -f '{{.State.Running}}' go-worker-smoke)" != "true" ]; then
+              echo "End-to-end test failed: worker exited unexpectedly."
+              docker logs go-worker-smoke
+              exit 1
+            fi
+
+            echo "Waiting for job ${JOB_ID} to complete (attempt ${attempt}/30)..."
+            sleep 2
+          done
+
+          echo "End-to-end test failed: job ${JOB_ID} was not completed within 60 seconds."
+          docker logs go-worker-smoke
+          exit 1
+
+      - name: Clean up smoke-test container
+        if: always()
+        run: docker rm -f go-worker-smoke || true
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/cloudvgr2/relay-go-worker
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long
+
+      - name: Build and publish Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./services/jobs-worker
+          file: ./services/jobs-worker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

@@ -1,0 +1,17 @@
+{
+  // Inherit the main TypeScript settings from tsconfig.json.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // Application source files are compiled from the src directory.
+    "rootDir": "./src",
+
+    // Do not emit separate TypeScript declaration files during this build.
+    "declaration": false
+  },
+
+  // Include application source files in the production build.
+  "include": ["src"],
+
+  // Exclude dependencies, tests, previous builds, and spec files.
+  "exclude": ["node_modules", "test", "dist", "**/*spec.ts"]
+}

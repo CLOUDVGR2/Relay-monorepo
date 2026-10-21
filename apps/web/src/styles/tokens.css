@@ -1,0 +1,43 @@
+:root {
+  color-scheme: light dark;
+
+  --app-radius-sm: 0.5rem;
+  --app-radius-md: 0.75rem;
+  --app-radius-lg: 1rem;
+  --app-radius-xl: 1.25rem;
+
+  --app-space-1: 0.25rem;
+  --app-space-2: 0.5rem;
+  --app-space-3: 0.75rem;
+  --app-space-4: 1rem;
+  --app-space-6: 1.5rem;
+  --app-space-8: 2rem;
+
+  --app-focus-ring: 0 0 0 3px
+    color-mix(in srgb, var(--color-primary, #6366f1) 30%, transparent);
+
+  --app-transition: 160ms ease;
+}
+
+:where(
+  button,
+  input,
+  textarea,
+  select,
+  a[href],
+  [tabindex]:not([tabindex="-1"])
+):focus-visible {
+  outline: 2px solid var(--color-primary, #6366f1);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

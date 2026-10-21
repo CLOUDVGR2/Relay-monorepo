@@ -1,0 +1,56 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: relay
+
+resources:
+  - resources/mongodb/deployment.yaml
+  - resources/postgres/deployment.yaml
+  - resources/redis/deployment.yaml
+  - resources/rabbitmq/deployment.yaml
+  - resources/backend/deployment.yaml
+  - resources/backend/configmap.yaml
+  - resources/frontend/deployment.yaml
+  - resources/frontend/service.yaml
+  - resources/go-api/deployment.yaml
+  - resources/go-api/configmap.yaml
+  - resources/go-api/service.yaml
+  - resources/go-worker/deployment.yaml
+  - resources/go-worker/configmap.yaml
+  - resources/nest-api/deployment.yaml
+  - resources/nest-api/configmap.yaml
+  - resources/nest-api/service.yaml
+  - resources/python-ai/deployment.yaml
+  - resources/python-ai/configmap.yaml
+  - resources/python-ai/service.yaml
+  - ingress.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: relay
+      app.kubernetes.io/part-of: relay
+      app.kubernetes.io/managed-by: kustomize
+      app.kubernetes.io/environment: aws
+
+images:
+  - name: relay-frontend
+    newName: AWS_ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/relay-frontend
+    newTag: REPLACE_WITH_IMAGE_TAG
+  - name: relay-backend
+    newName: AWS_ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/relay-backend
+    newTag: REPLACE_WITH_IMAGE_TAG
+  - name: relay-go-api
+    newName: AWS_ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/relay-go-api
+    newTag: REPLACE_WITH_IMAGE_TAG
+  - name: relay-go-worker
+    newName: AWS_ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/relay-go-worker
+    newTag: REPLACE_WITH_IMAGE_TAG
+  - name: relay-nest-api
+    newName: AWS_ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/relay-nest-api
+    newTag: REPLACE_WITH_IMAGE_TAG
+  - name: relay-python-ai
+    newName: AWS_ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/relay-python-ai
+    newTag: REPLACE_WITH_IMAGE_TAG
+
+patches:
+  - path: backend-hpa-patch.yaml

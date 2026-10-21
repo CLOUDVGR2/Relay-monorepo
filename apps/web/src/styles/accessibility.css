@@ -1,0 +1,144 @@
+/*
+ * Relay accessibility foundation
+ * Target: WCAG 2.2 AA, with progressive enhancements.
+ */
+
+/* Keep layouts usable on narrow screens and with text zoom. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-padding-block: 1rem;
+}
+
+body {
+  min-width: 320px;
+  overflow-wrap: break-word;
+}
+
+img,
+video,
+canvas {
+  max-width: 100%;
+}
+
+/* Consistent, visible keyboard focus across themes and components. */
+:where(
+  a,
+  button,
+  input,
+  textarea,
+  select,
+  summary,
+  [role="button"],
+  [role="link"],
+  [tabindex]:not([tabindex="-1"])
+):focus-visible {
+  outline: 3px solid var(--color-primary, #2563eb);
+  outline-offset: 3px;
+}
+
+/* Do not let decorative wrappers hide keyboard focus. */
+:where(button, a, input, textarea, select):focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Reusable skip link: hidden until keyboard users focus it. */
+.a11y-skip-link {
+  position: fixed;
+  z-index: 9999;
+  inset-block-start: 0.75rem;
+  inset-inline-start: 0.75rem;
+  max-width: calc(100vw - 1.5rem);
+  padding: 0.75rem 1rem;
+  border: 2px solid currentColor;
+  border-radius: 0.75rem;
+  background: #fff;
+  color: #111827;
+  font-weight: 700;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 20%);
+  transform: translateY(calc(-100% - 1rem));
+}
+
+.a11y-skip-link:focus,
+.a11y-skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+/* A consistent accessible name helper when visible labels are not possible. */
+.a11y-visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* Make anchors and controls easier to use on touch screens. */
+.a11y-touch-target {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+
+/* Improve touch usability on devices operated by touch. */
+@media (pointer: coarse) {
+  :where(button, a[href], [role="button"]) {
+    touch-action: manipulation;
+  }
+
+  .a11y-touch-target {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* Avoid fixed-width children forcing horizontal page overflow. */
+#root,
+#main-content {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Keep focused elements visible when users navigate long pages. */
+:where(input, textarea, select, button, a, [tabindex]):focus {
+  scroll-margin-block: 1rem;
+}
+
+/* Respect operating-system motion preferences. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+}
+
+/* Maintain visible focus and system colors in Windows High Contrast mode. */
+@media (forced-colors: active) {
+  :where(
+    a,
+    button,
+    input,
+    textarea,
+    select,
+    summary,
+    [role="button"],
+    [role="link"],
+    [tabindex]:not([tabindex="-1"])
+  ):focus-visible {
+    outline: 2px solid Highlight;
+  }
+
+  .a11y-skip-link {
+    border: 2px solid CanvasText;
+    background: Canvas;
+    color: CanvasText;
+  }
+}

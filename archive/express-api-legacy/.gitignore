@@ -1,0 +1,12 @@
+# Local authentication test cookies
+cookies.txt
+recipient-cookies.txt
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies and test output
+node_modules/
+coverage/

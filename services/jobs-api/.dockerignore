@@ -1,0 +1,9 @@
+.git
+.env
+.env.*
+!.env.example
+*.bak
+*.bak*
+coverage.out
+coverage.html
+.DS_Store

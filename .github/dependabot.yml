@@ -1,0 +1,90 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, security]
+  - package-ecosystem: npm
+    directory: "/apps/web"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, security]
+  - package-ecosystem: npm
+    directory: "/services/express-api"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, security]
+  - package-ecosystem: npm
+    directory: "/services/nest-api"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, security]
+  - package-ecosystem: gomod
+    directory: "/services/jobs-api"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, security]
+  - package-ecosystem: gomod
+    directory: "/services/jobs-worker"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, security]
+  - package-ecosystem: gomod
+    directory: "/services/api-gateway"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, security]
+  - package-ecosystem: pip
+    directory: "/services/ai-service"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, security]
+  - package-ecosystem: docker
+    directory: "/services/ai-service"
+    schedule:
+      interval: weekly
+    labels: [dependencies, security]
+  - package-ecosystem: docker
+    directory: "/services/jobs-worker"
+    schedule:
+      interval: weekly
+    labels: [dependencies, security]
+  - package-ecosystem: docker
+    directory: "/services/jobs-api"
+    schedule:
+      interval: weekly
+    labels: [dependencies, security]
+  - package-ecosystem: docker
+    directory: "/services/api-gateway"
+    schedule:
+      interval: weekly
+    labels: [dependencies, security]
+  - package-ecosystem: docker
+    directory: "/services/nest-api"
+    schedule:
+      interval: weekly
+    labels: [dependencies, security]
+  - package-ecosystem: docker
+    directory: "/services/express-api"
+    schedule:
+      interval: weekly
+    labels: [dependencies, security]
+  - package-ecosystem: docker
+    directory: "/apps/web"
+    schedule:
+      interval: weekly
+    labels: [dependencies, security]
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels: [dependencies, security]

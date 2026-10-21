@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: relay
+resources:
+- ../../base
+- ../../apps/nest-api
+- ../../apps/python-ai
+- ../../apps/go-api
+- ../../apps/go-worker
+- ../../apps/frontend
+- ingress.yaml
+patches:
+- path: backend-hpa-patch.yaml
+- path: mongodb-patch.yaml
+labels:
+- pairs:
+    app.kubernetes.io/environment: local
+replicas:
+- name: backend
+  count: 1

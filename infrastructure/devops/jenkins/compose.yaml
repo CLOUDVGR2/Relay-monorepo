@@ -1,0 +1,21 @@
+name: relay-jenkins
+
+services:
+  jenkins:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: relay-jenkins:local
+    container_name: relay-jenkins
+    restart: unless-stopped
+    group_add:
+      - "0"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  jenkins_home:
+    name: relay_jenkins_home

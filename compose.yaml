@@ -1,0 +1,273 @@
+name: relay
+
+services:
+  mongodb:
+    image: relay-mongodb:local
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:27018:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  rabbitmq:
+    image: relay-rabbitmq:local
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?Set RABBITMQ_DEFAULT_USER in .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Set RABBITMQ_DEFAULT_PASS in .env}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  redis:
+    image: relay-redis:local
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  postgres:
+    image: relay-postgres:local
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: atlas_ai
+      POSTGRES_USER: atlas_ai
+      POSTGRES_PASSWORD: ${ATLAS_POSTGRES_PASSWORD:?Set ATLAS_POSTGRES_PASSWORD in root .env}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - atlas_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atlas_ai -d atlas_ai"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  express-api:
+    build:
+      context: ./services/express-api
+      dockerfile: Dockerfile
+    image: relay-express-api:local
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 5001
+      MONGODB_URI: mongodb://mongodb:27017/relay
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in root .env}
+      REDIS_URL: redis://redis:6379
+      CLIENT_URL: http://localhost:80,http://localhost:5173,http://127.0.0.1:5173,http://localhost:8088,http://127.0.0.1:8088
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+      PYTHON_AI_BASE_URL: http://ai-service:8000
+      PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?Set PYTHON_AI_INTERNAL_TOKEN in root .env}
+    ports:
+      - "127.0.0.1:5001:5001"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+
+  nest-api:
+    build:
+      context: ./services/nest-api
+      dockerfile: Dockerfile
+    image: relay-nest-api:local
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      CLIENT_URL: http://localhost:5173,http://127.0.0.1:5173,http://localhost:8088,http://127.0.0.1:8088
+      PORT: 3000
+      DATABASE_URL: postgresql://atlas_ai:${ATLAS_POSTGRES_PASSWORD:?Set ATLAS_POSTGRES_PASSWORD in root .env}@postgres:5432/atlas_ai
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in root .env}
+      REDIS_URL: redis://redis:6379
+      MONGODB_URI: mongodb://mongodb:27017/relay
+      GO_API_BASE_URL: http://jobs-api:8081
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Set INTERNAL_API_TOKEN in root .env}
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    image: relay-web:local
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8088:80"
+    depends_on:
+      - express-api
+      - nest-api
+
+  jobs-worker:
+    build:
+      context: ./services/jobs-worker
+      dockerfile: Dockerfile
+    image: relay-jobs-worker:local
+    restart: unless-stopped
+    init: true
+    environment:
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_HOST: rabbitmq:5672
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?Set RABBITMQ_DEFAULT_USER in .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Set RABBITMQ_DEFAULT_PASS in .env}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    pids_limit: 100
+    stop_grace_period: 35s
+
+
+  jobs-api:
+    image: relay-jobs-api:local
+    build:
+      context: ./services/jobs-api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      PORT: "8081"
+      CLIENT_URL: http://localhost:5173,http://127.0.0.1:5173,http://localhost:8088,http://127.0.0.1:8088
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Set INTERNAL_API_TOKEN in root .env}
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_HOST: rabbitmq:5672
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?Set RABBITMQ_DEFAULT_USER in .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Set RABBITMQ_DEFAULT_PASS in .env}
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 128m
+    pids_limit: 100
+
+
+
+  api-gateway:
+    image: relay-api-gateway:local
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      GATEWAY_PORT: "8090"
+      GATEWAY_EXPRESS_URL: http://express-api:5001
+      GATEWAY_NEST_URL: http://nest-api:3000
+      GATEWAY_GO_URL: http://jobs-api:8081
+      GATEWAY_PYTHON_URL: http://ai-service:8000
+    ports:
+      - "127.0.0.1:8090:8090"
+    depends_on:
+      - express-api
+      - nest-api
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8090/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 128m
+    pids_limit: 100
+
+  ai-service:
+    build:
+      context: ./services/ai-service
+      dockerfile: Dockerfile
+    image: relay-ai-service:local
+    restart: unless-stopped
+    init: true
+    environment:
+      CLIENT_URL: http://localhost:5173,http://127.0.0.1:5173,http://localhost:8088,http://127.0.0.1:8088
+      DATABASE_URL: "postgresql+asyncpg://atlas_ai:${ATLAS_POSTGRES_PASSWORD:?Set ATLAS_POSTGRES_PASSWORD in root .env}@postgres:5432/atlas_ai"
+      PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?Set PYTHON_AI_INTERNAL_TOKEN in root .env}
+      OLLAMA_BASE_URL: "http://host.docker.internal:11434"
+      AI_PROVIDER: ${AI_PROVIDER:-litellm}
+      LITELLM_MODEL: ${LITELLM_MODEL:-ollama_chat/qwen2.5:3b-instruct}
+      LITELLM_API_BASE: ${LITELLM_API_BASE:-http://host.docker.internal:11434}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+    pids_limit: 100
+
+volumes:
+  mongodb_data:
+    name: fullstack-chat-app_mongodb_data
+    external: true
+  rabbitmq_data:
+    name: fullstack-chat-app_rabbitmq_data
+    external: true
+  redis_data:
+    name: fullstack-chat-app_redis_data
+    external: true
+  atlas_postgres_data:
+    name: fullstack-chat-app_atlas_postgres_data
+    external: true

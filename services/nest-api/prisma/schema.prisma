@@ -1,0 +1,145 @@
+/// Generates the Prisma Client used by the NestJS application.
+///
+/// The generated client will be placed in ../generated/prisma
+/// relative to this schema file.
+generator client {
+  // Generate the modern Prisma TypeScript client.
+  provider = "prisma-client"
+
+  // Keep generated files inside src for the NestJS build.
+  output = "../src/generated/prisma"
+  binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+}
+
+/// Defines the database provider.
+///
+/// The actual DATABASE_URL is configured in prisma.config.ts.
+/// Defines the PostgreSQL database connection.
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ConversationParticipantRole {
+  ADMIN
+  MEMBER
+}
+
+/// Represents a conversation in the chat service.
+///
+/// This model owns the conversation record in PostgreSQL.
+/// User identities remain managed by the existing Express service.
+///
+/// A conversation can be one-to-one or contain multiple participants.
+/// User identities remain managed by the existing Express service.
+model Conversation {
+  /// Unique identifier for the conversation.
+  ///
+  /// @id makes this the primary key.
+  /// @default(uuid()) automatically generates a UUID for new records.
+  /// @db.Uuid stores the value using PostgreSQL's native UUID type.
+  id String @id @default(uuid()) @db.Uuid
+
+  /// Timestamp set automatically when the conversation is created.
+  createdAt DateTime @default(now())
+
+  /// Timestamp automatically updated when the record changes.
+  ///
+  /// Prisma manages this value during updates.
+  updatedAt DateTime @updatedAt
+
+  /// Optional display name for group conversations.
+  name String?
+
+  /// Optional group description.
+  description String?
+
+  /// One conversation can contain many messages.
+  ///
+  /// This is a relation field managed by Prisma, not a separate
+  /// column in the conversations table.
+  messages ChatMessage[]
+
+  /// List the users who belong to this conversation.
+  ///
+  /// Prisma uses this relation to connect the conversation to its
+  /// membership records in the conversation_participants table.
+  participants ConversationParticipant[]
+
+  /// Use "conversations" as the actual PostgreSQL table name.
+  @@map("conversations")
+}
+
+/// Represents a message sent within a conversation.
+model ChatMessage {
+  /// Unique identifier for the message.
+  ///
+  /// PostgreSQL stores this as a UUID.
+  id String @id @default(uuid()) @db.Uuid
+
+  /// UUID of the conversation this message belongs to.
+  ///
+  /// This field references Conversation.id.
+  conversationId String @db.Uuid
+
+  /// Identifier of the sender, managed by the existing identity service.
+  ///
+  /// This is a string rather than a Prisma relation because users
+  /// currently live in MongoDB, not in this PostgreSQL database.
+  senderId String
+
+  /// Text content of the message.
+  text String
+
+  /// Timestamp set when the message is created.
+  createdAt DateTime @default(now())
+
+  /// Connect this message to its conversation.
+  ///
+  /// fields identifies the foreign-key field on ChatMessage.
+  /// references identifies the primary key on Conversation.
+  /// onDelete: Cascade means deleting a conversation also deletes
+  /// its associated messages.
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  /// Speeds up queries that retrieve messages for a conversation
+  /// in chronological order.
+  @@index([conversationId, createdAt(sort: Desc), id(sort: Desc)], map: "chat_messages_conversationId_createdAt_id_idx")
+  /// Helps queries that filter messages by sender.
+  @@index([senderId])
+  /// Use "chat_messages" as the actual PostgreSQL table name.
+  @@map("chat_messages")
+}
+
+/// Represents one user's membership in a conversation.
+///
+/// This join table supports both private conversations and group chats.
+/// User records remain in the existing identity service, so userId is
+/// stored as a string without a PostgreSQL foreign-key relation.
+model ConversationParticipant {
+  /// Unique identifier for this membership record.
+  id String @id @default(uuid()) @db.Uuid
+
+  /// UUID of the conversation this user belongs to.
+  conversationId String @db.Uuid
+
+  /// ID of the user from the existing identity service.
+  userId String
+  role   ConversationParticipantRole @default(MEMBER)
+
+  /// Timestamp recording when the user joined the conversation.
+  joinedAt DateTime @default(now())
+
+  /// Connect this membership to its conversation.
+  ///
+  /// If the conversation is deleted, PostgreSQL also deletes its
+  /// membership records through the configured cascade behavior.
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  /// Prevent the same user from joining the same conversation twice.
+  @@unique([conversationId, userId])
+  /// Speed up queries that find conversations by user ID.
+  @@index([userId])
+  /// Use "conversation_participants" as the PostgreSQL table name.
+  @@map("conversation_participants")
+}

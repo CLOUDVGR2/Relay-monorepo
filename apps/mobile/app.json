@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "Relay",
+    "slug": "relay-mobile",
+    "scheme": "relay",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.relay.mobile"
+    },
+    "android": {
+      "package": "com.relay.mobile"
+    },
+    "plugins": [
+      "expo-secure-store"
+    ],
+    "extra": {
+      "apiUrlHelp": "Set EXPO_PUBLIC_API_URL to your reachable HTTPS API base URL ending in /api. Use a LAN IP for a physical device."
+    }
+  }
+}

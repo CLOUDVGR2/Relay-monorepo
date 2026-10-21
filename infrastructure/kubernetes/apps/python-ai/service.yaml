@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: python-ai
+  labels:
+    app.kubernetes.io/name: python-ai
+    app.kubernetes.io/part-of: relay
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: python-ai
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000

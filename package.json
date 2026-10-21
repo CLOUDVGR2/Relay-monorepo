@@ -1,0 +1,52 @@
+{
+  "name": "relay",
+  "version": "1.0.0",
+  "description": "Relay polyglot microservices monorepo",
+  "scripts": {
+    "install:all": "npm install && npm install --prefix services/express-api && npm install --prefix services/nest-api && npm install --prefix apps/web && npm install --prefix apps/mobile",
+    "build:all": "npm run build:express-api && npm run build:nest-api && npm run build:web && npm run build:jobs-api && npm run build:jobs-worker && npm run build:api-gateway",
+    "test:all": "npm run test:express-api && npm run test:nest-api && npm run test:web && npm run test:ai-service && npm run test:jobs-api && npm run test:jobs-worker && npm run test:api-gateway",
+    "docker:up": "docker compose -f compose.yaml up -d",
+    "docker:down": "docker compose -f compose.yaml down",
+    "docker:logs": "docker compose -f compose.yaml logs -f",
+    "docker:build": "docker compose -f compose.yaml build",
+    "test:jobs-api": "cd services/jobs-api && go test ./...",
+    "test:jobs-worker": "cd services/jobs-worker && go test ./...",
+    "build:express-api": "npm run build --prefix services/express-api",
+    "start:express-api": "npm run start --prefix services/express-api",
+    "dev:express-api": "npm run dev --prefix services/express-api",
+    "test:express-api": "npm run test:integration --prefix services/express-api",
+    "build:jobs-api": "cd services/jobs-api && go build ./...",
+    "build:jobs-worker": "cd services/jobs-worker && go build ./...",
+    "build:nest-api": "npm run build --prefix services/nest-api",
+    "build:web": "npm run build --prefix apps/web",
+    "start:nest-api": "npm run start --prefix services/nest-api",
+    "start:web": "npm run dev --prefix apps/web",
+    "dev:nest-api": "npm run start:dev --prefix services/nest-api",
+    "dev:web": "npm run dev --prefix apps/web",
+    "test:web": "npm run test --prefix apps/web",
+    "test:ai-service": "services/ai-service/.venv/bin/python -m pytest services/ai-service/tests/ -v",
+    "test:e2e:nest-api": "npm run test:e2e --prefix services/nest-api",
+    "test:e2e:web": "npm run test:e2e --prefix apps/web",
+    "test:nest-api": "npm run test --prefix services/nest-api",
+    "test:api-gateway": "cd services/api-gateway && go test ./...",
+    "build:api-gateway": "cd services/api-gateway && go build ./...",
+    "dev:mobile": "npm run start --prefix apps/mobile",
+    "typecheck:mobile": "npm run typecheck --prefix apps/mobile"
+  },
+  "keywords": [
+    "chat",
+    "real-time",
+    "socket.io",
+    "nestjs",
+    "express",
+    "react"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "amqplib": "^2.2.0"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.4"
+  }
+}

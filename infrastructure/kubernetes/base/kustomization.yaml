@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: relay
+resources:
+- ../infra/mongodb
+- ../apps/backend
+- ../infra/postgres
+- ../infra/redis
+- ../infra/rabbitmq
+labels:
+- pairs:
+    app.kubernetes.io/name: relay
+    app.kubernetes.io/part-of: relay
+    app.kubernetes.io/managed-by: kustomize
