@@ -66,7 +66,7 @@
     "supertest": "^7.0.0",
     "typescript": "^6.0.2",
     "vite": "^8.0.0",
-    "vitest": "^4.1.2"
+    "vitest": "^5.0.5"
   },
   "allowScripts": {
     "@prisma/client@6.19.3": true,
