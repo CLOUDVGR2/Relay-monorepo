@@ -21,16 +21,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Scan for secrets
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Scan Git history for secrets
+        uses: docker://ghcr.io/gitleaks/gitleaks:v8.24.2
+        with:
+          args: detect --source=. --redact --exit-code=1
 
   dependency-audit:
     name: Dependency vulnerability audit
