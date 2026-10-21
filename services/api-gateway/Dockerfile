@@ -7,7 +7,7 @@ COPY *.go ./
 
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/gateway .
 
-FROM alpine:3.22
+FROM alpine:3.24
 
 RUN addgroup -S -g 10001 gateway \
     && adduser -S -D -H -u 10001 -G gateway gateway \
