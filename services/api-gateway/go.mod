@@ -1,3 +1,3 @@
 module github.com/CLOUDVGR2/Relay/services/api-gateway
 
-go 1.27.1
+go 1.27.3
