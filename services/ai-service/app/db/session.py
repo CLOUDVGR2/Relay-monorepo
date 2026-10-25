@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 # Load the repository-level .env without printing or overriding existing variables.
-REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 load_dotenv(REPOSITORY_ROOT / ".env", override=False)
 
 database_url = os.getenv("DATABASE_URL")
