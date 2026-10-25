@@ -5,8 +5,10 @@ import express from "express";
 import { protectRoute } from "../middleware/auth.middleware.js";
 
 import {
+  editMessage,
   getMessages,
   getUsersForSidebar,
+  markMessagesRead,
   sendMessage,
 } from "../controllers/message.controller.js";
 
@@ -147,6 +149,10 @@ router.get("/:id", protectRoute, getMessages);
  *       429:
  *         $ref: '#/components/responses/RateLimitExceeded'
  */
+router.post("/read/:id", protectRoute, markMessagesRead);
+
+router.patch("/:id", protectRoute, editMessage);
+
 router.post("/send/:id", protectRoute, sendMessageRateLimiter, sendMessage);
 
 export default router;

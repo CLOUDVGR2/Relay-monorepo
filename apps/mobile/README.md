@@ -15,7 +15,7 @@ The mobile app is not yet a complete parity implementation of every web route (i
 
 ## Requirements
 
-- Node.js/npm compatible with the repository's tooling.
+- Node.js and pnpm versions compatible with the repository's tooling.
 - iOS Simulator/Xcode for iOS simulator workflows, Android Studio/emulator for Android, or Expo Go where the selected Expo SDK and dependencies support it.
 - The Express API reachable from the device, MongoDB and Redis as configured, and the Python AI service configured for AI answers.
 
@@ -38,15 +38,15 @@ Set `EXPO_PUBLIC_API_URL` to the full API base URL ending in `/api`:
 From the repository root:
 
 ```bash
-npm install --prefix apps/mobile
-npm run dev:mobile
+pnpm install
+pnpm run dev:mobile
 ```
 
 Then use Expo's terminal prompts to open a simulator or scan the development QR code. Alternatively:
 
 ```bash
-npm run android --prefix apps/mobile
-npm run ios --prefix apps/mobile
+pnpm --filter @relay/mobile run android
+pnpm --filter @relay/mobile run ios
 ```
 
 The device and API must be on mutually reachable networks. A native app does not use the browser's same-origin proxy, so it calls the configured API origin directly.
@@ -71,7 +71,7 @@ The device and API must be on mutually reachable networks. A native app does not
 ## Validation
 
 ```bash
-npm run typecheck:mobile
+pnpm --filter @relay/mobile run typecheck
 ```
 
 This command requires dependencies installed and checks the TypeScript surface. Before a release, also run Expo prebuild/build for both platforms, exercise authentication against a real staging API, verify the token lifecycle and AI origin policy, test reconnect and duplicate-message scenarios, run accessibility checks on physical devices, and profile startup time, JS heap, memory warnings, and battery/network use. A successful TypeScript check is not a store-build or production-readiness sign-off.

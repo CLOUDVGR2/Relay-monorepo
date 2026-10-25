@@ -95,3 +95,8 @@ apps/mobile/*.keystore
 apps/mobile/*.p8
 apps/mobile/*.p12
 apps/mobile/*.mobileprovision
+
+# Local credentials and session artifacts
+/cookies.txt
+/apps/mobile/google-services.json
+/gitleaks-redacted-report.json

@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 
 import User from "../models/user.model.js";
 import Message from "../models/message.model.js";
+import { createMessageNotification } from "../lib/notification.service.js";
 import cloudinary from "../lib/cloudinary.js";
 import { getUserRoom, io } from "../lib/socket.js";
 import { validateImageDataUri } from "../lib/image-data-uri.js";
@@ -110,6 +111,10 @@ export const getMessages = async (req, res) => {
     const fetched = await Message.find(query)
       .sort({ createdAt: -1, _id: -1 })
       .limit(limit + 1)
+      .populate({
+        path: "replyTo",
+        select: "senderId receiverId text image createdAt",
+      })
       .lean()
       .exec();
 
@@ -139,11 +144,153 @@ export const getMessages = async (req, res) => {
   }
 };
 
+// Mark incoming messages from one conversation partner as read.
+export const markMessagesRead = async (req, res) => {
+  try {
+    const { id: senderId } = req.params;
+    const receiverId = req.user._id;
+
+    if (!mongoose.isValidObjectId(senderId)) {
+      return res.status(400).json({ message: "Invalid sender ID" });
+    }
+
+    if (String(senderId) === String(receiverId)) {
+      return res.status(400).json({ message: "Invalid conversation partner" });
+    }
+
+    const senderExists = await User.exists({ _id: senderId });
+    if (!senderExists) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Include legacy messages that predate the readAt field.
+    const unreadFilter = {
+      senderId,
+      receiverId,
+      $or: [
+        { readAt: null },
+        { readAt: { $exists: false } },
+      ],
+    };
+
+    const unreadMessages = await Message.find(unreadFilter)
+      .select("_id")
+      .lean()
+      .exec();
+
+    if (unreadMessages.length === 0) {
+      return res.status(200).json({
+        messageIds: [],
+        readAt: null,
+      });
+    }
+
+    const readAt = new Date();
+    const messageIds = unreadMessages.map((message) => String(message._id));
+
+    await Message.updateMany(
+      { ...unreadFilter, _id: { $in: unreadMessages.map((message) => message._id) } },
+      { $set: { readAt } },
+    ).exec();
+
+    // Notify every active connection belonging to the original sender.
+    io.to(getUserRoom(senderId)).emit("messagesRead", {
+      readerId: String(receiverId),
+      messageIds,
+      readAt: readAt.toISOString(),
+    });
+
+    res.set("Cache-Control", "no-store");
+    return res.status(200).json({ messageIds, readAt: readAt.toISOString() });
+  } catch (error) {
+    console.error("markMessagesRead failed:", error.message);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 // Save a message and deliver it to the recipient's active connections.
+// Edit a text message only when the authenticated user sent it.
+export const editMessage = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const senderId = req.user._id;
+    const { text } = req.body ?? {};
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ message: "Invalid message ID" });
+    }
+
+    if (typeof text !== "string") {
+      return res.status(400).json({
+        message: "Message text must be a string",
+      });
+    }
+
+    const normalizedText = text.trim();
+
+    if (!normalizedText) {
+      return res.status(400).json({
+        message: "Message text cannot be empty",
+      });
+    }
+
+    if (normalizedText.length > 5000) {
+      return res.status(400).json({
+        message: "Message text must not exceed 5000 characters",
+      });
+    }
+
+    const message = await Message.findOne({
+      _id: id,
+      senderId,
+    });
+
+    if (!message) {
+      // Do not disclose whether another user's message exists.
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    if (!message.text?.trim()) {
+      return res.status(400).json({
+        message: "Only text messages can be edited",
+      });
+    }
+
+    message.text = normalizedText;
+    message.editedAt = new Date();
+    await message.save();
+
+    await message.populate({
+      path: "replyTo",
+      select: "senderId receiverId text image createdAt",
+    });
+
+    const updatedMessage = message.toObject();
+
+    // Notify both participants, including their other active devices.
+    io.to(getUserRoom(message.senderId)).emit(
+      "messageUpdated",
+      updatedMessage,
+    );
+    io.to(getUserRoom(message.receiverId)).emit(
+      "messageUpdated",
+      updatedMessage,
+    );
+
+    return res.status(200).json(updatedMessage);
+  } catch (error) {
+    console.error("editMessage failed:", error.message);
+
+    return res.status(500).json({
+      message: "Internal server error",
+    });
+  }
+};
+
 export const sendMessage = async (req, res) => {
   try {
     const { id: receiverId } = req.params;
-    const { text, image } = req.body ?? {};
+    const { text, image, replyTo } = req.body ?? {};
     const senderId = req.user._id;
 
     // Reject malformed recipient IDs before database or upload operations.
@@ -160,6 +307,28 @@ export const sendMessage = async (req, res) => {
       return res.status(404).json({
         message: "Recipient not found",
       });
+    }
+
+    // Replies must reference a message in this exact conversation.
+    let replyToMessage = null;
+    if (replyTo !== undefined && replyTo !== null && replyTo !== "") {
+      if (typeof replyTo !== "string" || !mongoose.isValidObjectId(replyTo)) {
+        return res.status(400).json({ message: "Invalid reply message ID" });
+      }
+
+      replyToMessage = await Message.findOne({
+        _id: replyTo,
+        $or: [
+          { senderId, receiverId },
+          { senderId: receiverId, receiverId: senderId },
+        ],
+      }).select("_id").lean().exec();
+
+      if (!replyToMessage) {
+        return res.status(400).json({
+          message: "Reply target must belong to this conversation",
+        });
+      }
     }
 
     // Validate text without preventing image-only messages.
@@ -224,7 +393,28 @@ export const sendMessage = async (req, res) => {
       receiverId,
       text: normalizedText,
       image: imageUrl,
+      replyTo: replyToMessage?._id ?? null,
     });
+
+    await newMessage.populate({
+      path: "replyTo",
+      select: "senderId receiverId text image createdAt",
+    });
+
+    // Persist in-app activity and attempt push delivery independently.
+    // Notification failures must not turn a saved message into a failed send.
+    try {
+      await createMessageNotification({
+        senderId,
+        receiverId,
+        message: newMessage,
+      });
+    } catch (notificationError) {
+      console.error(
+        "Message notification creation failed:",
+        notificationError.message,
+      );
+    }
 
     // Deliver to the recipient's private room, including every active tab.
     // The room name is based on the validated recipient ID.

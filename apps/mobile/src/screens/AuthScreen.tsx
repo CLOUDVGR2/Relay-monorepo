@@ -4,11 +4,11 @@ import { api, getErrorMessage } from '../lib/api';
 import { Screen } from '../components/Screen';
 import { Brand, Button, ErrorText, Field, Heading } from '../components/Ui';
 import { colors } from '../theme/colors';
+import type { RelayUser } from '../navigation/types';
 
-type User = { _id: string; fullName: string; email: string; profilePic?: string | null };
-type AuthResult = User & { accessToken: string; tokenType: 'Bearer'; expiresIn: number };
+type AuthResult = RelayUser & { accessToken: string; tokenType: 'Bearer'; expiresIn: number };
 
-export function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: User, token: string) => Promise<void> }) {
+export function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: RelayUser, token: string) => Promise<void> }) {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -17,6 +17,9 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: User, 
   const [error, setError] = useState('');
 
   const submit = async () => {
+    // Ignore repeated taps while an authentication request is in progress.
+    if (busy) return;
+
     setError('');
     if (mode === 'signup' && !fullName.trim()) return setError('Enter your full name.');
     if (!email.trim() || !password) return setError('Enter your email and password.');
@@ -43,9 +46,9 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: User, 
       <Field label="EMAIL ADDRESS" placeholder="you@company.com" value={email} onChangeText={setEmail} keyboardType="email-address" autoComplete="email" textContentType="emailAddress" maxLength={254} />
       <Field label="PASSWORD" placeholder="Enter your password" value={password} onChangeText={setPassword} secureTextEntry autoComplete={mode === 'login' ? 'current-password' : 'new-password'} textContentType={mode === 'login' ? 'password' : 'newPassword'} maxLength={72} onSubmitEditing={submit} />
       <ErrorText>{error}</ErrorText>
-      <Button onPress={submit} loading={busy}>{mode === 'login' ? 'Sign in securely' : 'Create account'}</Button>
+      <Button onPress={submit} loading={busy} disabled={busy}>{mode === 'login' ? 'Sign in securely' : 'Create account'}</Button>
       <View style={styles.switchRow}><Text style={styles.switchText}>{mode === 'login' ? 'New to Relay?' : 'Already have an account?'}</Text><Pressable accessibilityRole="button" onPress={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); }}><Text style={styles.switchLink}>{mode === 'login' ? 'Create account' : 'Sign in'}</Text></Pressable></View>
-      <Text style={styles.securityNote}>Your session credential is stored using the device's secure storage.</Text>
+      <Text style={styles.securityNote}>Your session credential is stored using the device&apos;s secure storage.</Text>
     </View>
   </Screen>;
 }

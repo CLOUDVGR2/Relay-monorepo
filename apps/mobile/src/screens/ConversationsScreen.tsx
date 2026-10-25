@@ -1,35 +1,70 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { api, getErrorMessage } from '../lib/api';
 import { getRealtimeSocket } from '../lib/realtime';
 import { Avatar, ErrorText, Heading } from '../components/Ui';
 import { Screen } from '../components/Screen';
 import { colors } from '../theme/colors';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { RelayUser, RootStackParamList } from '../navigation/types';
 
-type Person = { _id: string; fullName: string; email: string; profilePic?: string | null };
+type Props = NativeStackScreenProps<RootStackParamList, 'Conversations'> & {
+  user: RelayUser;
+  onLogout: () => Promise<void>;
+};
 
-export function ConversationsScreen({ navigation, user, onLogout }: { navigation: any; user: Person; onLogout: () => Promise<void> }) {
-  const [people, setPeople] = useState<Person[]>([]);
+export function ConversationsScreen({ navigation, user, onLogout }: Props) {
+  const [people, setPeople] = useState<RelayUser[]>([]);
   const [online, setOnline] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Derive initial loading from whether the first contacts request has finished.
+  const [hasLoadedPeople, setHasLoadedPeople] = useState(false);
+  const loading = !hasLoadedPeople;
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
 
+  // Keep track of the request so it can be cancelled when this screen unmounts.
+  const peopleRequest = useRef<AbortController | null>(null);
+
   const loadPeople = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true); else setLoading(true);
-    setError('');
+    // Cancel an older request before starting another one.
+    peopleRequest.current?.abort();
+    const controller = new AbortController();
+    peopleRequest.current = controller;
+
+    if (isRefresh) setRefreshing(true);
+
     try {
-      const response = await api.get<Person[]>('/messages/users');
+      const response = await api.get<RelayUser[]>('/messages/users', {
+        signal: controller.signal,
+      });
+
+      if (controller.signal.aborted) return;
+
       setPeople(Array.isArray(response.data) ? response.data : []);
+      setError('');
     } catch (requestError) {
+      if (controller.signal.aborted) return;
       setError(getErrorMessage(requestError, 'Unable to load your contacts.'));
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (peopleRequest.current === controller) {
+        peopleRequest.current = null;
+        setHasLoadedPeople(true);
+        setRefreshing(false);
+      }
     }
   }, []);
 
-  useEffect(() => { void loadPeople(); }, [loadPeople]);
+  useEffect(() => {
+    // Start loading after the effect finishes its synchronous phase.
+    const timer = setTimeout(() => {
+      void loadPeople();
+    }, 0);
+
+    return () => {
+      clearTimeout(timer);
+      peopleRequest.current?.abort();
+    };
+  }, [loadPeople]);
   useEffect(() => {
     const socket = getRealtimeSocket();
     if (!socket) return;
@@ -39,7 +74,7 @@ export function ConversationsScreen({ navigation, user, onLogout }: { navigation
   }, []);
 
   return <Screen>
-    <View style={styles.top}><View><Text style={styles.eyebrow}>YOUR WORKSPACE</Text><Heading title="Messages" subtitle={`Signed in as ${user.fullName}`} /></View><View style={styles.actions}><Pressable accessibilityRole="button" onPress={() => navigation.navigate('AI')} style={styles.aiButton}><Text style={styles.aiButtonText}>✦ AI</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void onLogout()} style={styles.logout}><Text style={styles.logoutText}>Log out</Text></Pressable></View></View>
+    <View style={styles.top}><View><Text style={styles.eyebrow}>YOUR WORKSPACE</Text><Heading title="Messages" subtitle={`Signed in as ${user.fullName}`} /></View><View style={styles.actions}><Pressable accessibilityRole="button" onPress={() => navigation.navigate('Tasks')} style={[styles.aiButton, { marginRight: 8 }]}><Text style={styles.aiButtonText}>Tasks</Text></Pressable><Pressable accessibilityRole="button" onPress={() => navigation.navigate('AI')} style={styles.aiButton}><Text style={styles.aiButtonText}>✦ AI</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void onLogout()} style={styles.logout}><Text style={styles.logoutText}>Log out</Text></Pressable></View></View>
     <ErrorText>{error}</ErrorText>
     {loading ? <View style={styles.center}><ActivityIndicator color={colors.primary} size="large" /><Text style={styles.muted}>Loading your people…</Text></View> : <FlatList data={people} keyExtractor={(person) => person._id} contentContainerStyle={people.length ? styles.list : styles.emptyList} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadPeople(true)} tintColor={colors.primary} />} renderItem={({ item }) => {
       const isOnline = online.includes(String(item._id));

@@ -95,7 +95,7 @@ func enforceSecurityHeaders(h http.Header) {
 	h.Set("Referrer-Policy", "no-referrer")
 }
 
-func newReverseProxy(rawURL string, logger *slog.Logger) (http.Handler, *http.Transport) {
+func newReverseProxy(rawURL string, logger *slog.Logger, responseHeaderTimeout time.Duration) (http.Handler, *http.Transport) {
 	target, err := url.Parse(rawURL)
 	if err != nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -112,7 +112,7 @@ func newReverseProxy(rawURL string, logger *slog.Logger) (http.Handler, *http.Tr
 		MaxConnsPerHost:       100,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   5 * time.Second,
-		ResponseHeaderTimeout: 10 * time.Second,
+		ResponseHeaderTimeout: responseHeaderTimeout,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 	proxy := &httputil.ReverseProxy{Transport: transport}
@@ -179,14 +179,15 @@ func newGatewayRuntime(logger *slog.Logger, cfg config) *gatewayRuntime {
 		_, _ = w.Write([]byte("{\"status\":\"ready\"}\n"))
 	})
 
-	expressProxy, expressTransport := newReverseProxy(cfg.ExpressURL, logger)
-	nestProxy, nestTransport := newReverseProxy(cfg.NestURL, logger)
+	expressProxy, expressTransport := newReverseProxy(cfg.ExpressURL, logger, 75*time.Second)
+	socketIOProxy, socketIOTransport := newReverseProxy(cfg.ExpressURL, logger, 0)
+	nestProxy, nestTransport := newReverseProxy(cfg.NestURL, logger, 10*time.Second)
 
 	// Keep the initial public route allowlist narrow. Internal Go job endpoints
 	// and Python internal APIs are deliberately not exposed by this first pass.
 	mux.Handle("/api", expressProxy)
 	mux.Handle("/api/", expressProxy)
-	mux.Handle("/socket.io/", expressProxy)
+	mux.Handle("/socket.io/", socketIOProxy)
 	mux.Handle("/jobs", nestProxy)
 	mux.Handle("/jobs/", nestProxy)
 	mux.Handle("/graphql", nestProxy)
@@ -227,7 +228,7 @@ func newGatewayRuntime(logger *slog.Logger, cfg config) *gatewayRuntime {
 
 	return &gatewayRuntime{
 		handler:    handler,
-		transports: []*http.Transport{expressTransport, nestTransport},
+		transports: []*http.Transport{expressTransport, socketIOTransport, nestTransport},
 	}
 }
 

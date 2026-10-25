@@ -6,19 +6,23 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.relay.mobile"
     },
     "android": {
-      "package": "com.relay.mobile"
+      "package": "com.relay.mobile",
+      "googleServicesFile": "./google-services.json"
     },
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-notifications"
     ],
     "extra": {
-      "apiUrlHelp": "Set EXPO_PUBLIC_API_URL to your reachable HTTPS API base URL ending in /api. Use a LAN IP for a physical device."
+      "apiUrlHelp": "Set EXPO_PUBLIC_API_URL to your reachable HTTPS API base URL ending in /api. Use a LAN IP for a physical device.",
+      "eas": {
+        "projectId": "8bb6adca-f08c-4d23-8fa7-b605fba56146"
+      }
     }
   }
 }

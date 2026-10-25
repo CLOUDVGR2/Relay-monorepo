@@ -1,5 +1,5 @@
 /** Shared authenticated HTTP client for the Relay native application. */
-import axios from 'axios';
+import { create, isAxiosError } from 'axios';
 
 const configuredBaseUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
 
@@ -22,7 +22,7 @@ export function setAccessToken(token: string | null) {
   accessToken = token;
 }
 
-export const api = axios.create({
+export const api = create({
   baseURL: API_BASE_URL,
   timeout: 12_000,
   headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -36,7 +36,7 @@ api.interceptors.request.use((config) => {
 });
 
 export function getErrorMessage(error: unknown, fallback: string) {
-  if (axios.isAxiosError(error)) {
+  if (isAxiosError(error)) {
     const message = error.response?.data?.message;
     if (typeof message === 'string' && message.length < 240) return message;
     if (error.code === 'ECONNABORTED') return 'The request timed out. Please try again.';
@@ -50,7 +50,7 @@ export function getErrorMessage(error: unknown, fallback: string) {
 api.interceptors.response.use(
   (response) => response,
   (error: unknown) => {
-    if (axios.isAxiosError(error) && error.response?.status === 401 && accessToken) {
+    if (isAxiosError(error) && error.response?.status === 401 && accessToken) {
       unauthorizedHandler?.();
     }
     return Promise.reject(error);

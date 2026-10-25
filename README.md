@@ -122,7 +122,7 @@ Review `.env.example` and each service configuration before starting the applica
 
 ### 3. Start shared infrastructure
 
-**Local-stack prerequisite:** the current Compose file intentionally references pre-existing external data volumes named `fullstack-chat-app_mongodb_data`, `fullstack-chat-app_rabbitmq_data`, `fullstack-chat-app_redis_data`, and `fullstack-chat-app_atlas_postgres_data`. It also references project-specific local images (`relay-mongodb:local`, `relay-rabbitmq:local`, `relay-redis:local`, and `relay-postgres:local`) without build definitions. Those volumes and images must already exist on the machine, or be replaced through a deliberate, reviewed environment migration. Do not delete or recreate persistent volumes as a troubleshooting shortcut.
+**Local stack:** Compose uses official, versioned MongoDB, RabbitMQ, Redis, and PostgreSQL images. It creates managed persistent volumes named `relay-monorepo_mongodb_data`, `relay-monorepo_rabbitmq_data`, `relay-monorepo_redis_data`, and `relay-monorepo_atlas_postgres_data` on first startup. Application images use the `relay-monorepo-*:local` naming scheme. Back up persistent data before intentionally removing or recreating volumes.
 
 ```bash
 docker compose -f compose.yaml up -d mongodb redis postgres rabbitmq

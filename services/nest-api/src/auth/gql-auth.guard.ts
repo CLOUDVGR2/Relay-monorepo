@@ -30,8 +30,16 @@ export class GqlAuthGuard implements CanActivate {
 
     const request = gqlContext.req;
 
-    // Validate the existing Express cookie before trusting any identity.
-    const userId = this.jwtAuthService.verifyToken(request.cookies?.jwt);
+    // Support the existing web cookie and the mobile bearer-token client.
+    // Both credentials go through the same signature and payload validation.
+    const authorization = request.headers.authorization;
+    const bearerToken =
+      typeof authorization === 'string' &&
+      /^Bearer\s+\S+$/i.test(authorization)
+        ? authorization.replace(/^Bearer\s+/i, '')
+        : undefined;
+    const token = request.cookies?.jwt ?? bearerToken;
+    const userId = this.jwtAuthService.verifyToken(token);
 
     // Preserve the Express middleware's deleted-account protection.
     const accountExists = await this.authUserService.exists(userId);

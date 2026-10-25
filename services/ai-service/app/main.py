@@ -2,6 +2,7 @@
 
 
 from app.agentops.routes import router as incidents_router
+from app.agentops.conversation_routes import router as conversation_analysis_router
 from app.rag.routes import router as documents_router
 import os
 import math
@@ -43,6 +44,8 @@ app.add_middleware(
 app.include_router(router)
 
 app.include_router(incidents_router)
+
+app.include_router(conversation_analysis_router)
 
 app.include_router(documents_router)
 

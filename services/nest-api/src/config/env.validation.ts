@@ -249,6 +249,46 @@ export function validateEnvironment(
     }
   }
 
+  // Validate the optional Express call-event integration.
+  const callEventsBaseUrl = config['CALL_EVENTS_BASE_URL'];
+  const callEventsToken = config['CALL_EVENTS_INTERNAL_TOKEN'];
+
+  if (callEventsBaseUrl !== undefined || callEventsToken !== undefined) {
+    if (
+      typeof callEventsBaseUrl !== 'string' ||
+      !callEventsBaseUrl.trim()
+    ) {
+      throw new Error(
+        'CALL_EVENTS_BASE_URL is required when configuring call-event integration.',
+      );
+    }
+
+    requireNonEmptyString(
+      callEventsToken,
+      'CALL_EVENTS_INTERNAL_TOKEN',
+    );
+
+    try {
+      const parsedCallEventsUrl = new URL(callEventsBaseUrl);
+
+      if (
+        !['http:', 'https:'].includes(parsedCallEventsUrl.protocol) ||
+        !parsedCallEventsUrl.hostname ||
+        parsedCallEventsUrl.username ||
+        parsedCallEventsUrl.password ||
+        parsedCallEventsUrl.search ||
+        parsedCallEventsUrl.hash ||
+        parsedCallEventsUrl.pathname !== '/'
+      ) {
+        throw new Error();
+      }
+    } catch {
+      throw new Error(
+        'CALL_EVENTS_BASE_URL must be a valid HTTP(S) origin without credentials, path, query, or fragment.',
+      );
+    }
+  }
+
   return {
     ...config,
     PORT: port,

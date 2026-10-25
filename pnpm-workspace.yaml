@@ -1,0 +1,28 @@
+packages:
+  - 'apps/*'
+  - 'services/express-api'
+  - 'services/nest-api'
+
+allowBuilds:
+  "@scarf/scarf": false
+  protobufjs: true
+  "@apollo/protobufjs": true
+  "@prisma/client": true
+  "@prisma/engines": true
+  prisma: true
+  unrs-resolver: true
+
+auditConfig:
+  ignoreGhsas:
+    - GHSA-86w9-cpqp-85rv
+    - GHSA-mrhx-c7xc-m3w5
+
+minimumReleaseAgeExclude:
+  - expo-notifications@57.0.24
+
+overrides:
+  'body-parser@^1': 1.20.9
+  'body-parser@^2': 2.4.0
+  multer: 2.5.0
+  '@graphql-tools/utils@12': 12.0.2
+  deepmerge-ts: ^8.0.2

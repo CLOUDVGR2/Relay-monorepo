@@ -58,7 +58,7 @@ Test actual deployed components together, not only mocks:
 
 ### Local Compose prerequisites
 
-The root `compose.yaml` currently uses pre-existing external volumes with `fullstack-chat-app_*` names and project-specific local infrastructure image tags (`relay-mongodb:local`, `relay-rabbitmq:local`, `relay-redis:local`, and `relay-postgres:local`) without build definitions. A clean machine cannot be assumed to have these resources. Verify them before startup. Do not remove external-volume declarations, recreate volumes, or substitute images without a reviewed data-compatibility and migration plan.
+The root `compose.yaml` uses versioned official infrastructure images and Compose-managed volumes prefixed `relay-monorepo_`. Treat persistent volumes as durable data: verify the target environment and take appropriate backups before intentionally removing or recreating them. Review image-version upgrades and database compatibility before applying this local configuration to production.
 
 ### Configuration contract
 Maintain an inventory for every environment variable:

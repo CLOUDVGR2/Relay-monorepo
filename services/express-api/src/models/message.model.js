@@ -25,6 +25,22 @@ const messageSchema = new mongoose.Schema(
       },
     },
 
+    readAt: {
+      type: Date,
+      default: null,
+    },
+
+    editedAt: {
+      type: Date,
+      default: null,
+    },
+
+    replyTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Message",
+      default: null,
+    },
+
     text: {
       type: String,
       trim: true,

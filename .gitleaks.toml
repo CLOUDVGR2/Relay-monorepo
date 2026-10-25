@@ -1,0 +1,8 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allow the example-only JWT placeholder in its original commit and file"
+condition = "AND"
+commits = ["1a37624ad39f1894d2fa2392e539f6c125bfd379"]
+paths = ['''services/nest-api/\.env\.example''']

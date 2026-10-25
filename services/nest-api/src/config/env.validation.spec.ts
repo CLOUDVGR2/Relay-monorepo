@@ -219,4 +219,53 @@ describe('validateEnvironment', () => {
 
     expect(result['JWT_SECRET']).toBe(validConfig.JWT_SECRET);
   });
+
+  it('allows call-event integration settings to be omitted', () => {
+    expect(() => validateEnvironment(validConfig)).not.toThrow();
+  });
+
+  it('requires the call-event token when a base URL is configured', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validConfig,
+        CALL_EVENTS_BASE_URL: 'http://express-api:5001',
+      }),
+    ).toThrow(
+      'CALL_EVENTS_INTERNAL_TOKEN is required and must be a non-empty string.',
+    );
+  });
+
+  it('requires the call-event base URL when a token is configured', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validConfig,
+        CALL_EVENTS_INTERNAL_TOKEN: 'a-test-internal-token',
+      }),
+    ).toThrow(
+      'CALL_EVENTS_BASE_URL is required when configuring call-event integration.',
+    );
+  });
+
+  it('rejects a call-event base URL containing a path', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validConfig,
+        CALL_EVENTS_BASE_URL: 'http://express-api:5001/internal',
+        CALL_EVENTS_INTERNAL_TOKEN: 'a-test-internal-token',
+      }),
+    ).toThrow(
+      'CALL_EVENTS_BASE_URL must be a valid HTTP(S) origin without credentials, path, query, or fragment.',
+    );
+  });
+
+  it('accepts a valid call-event integration configuration', () => {
+    const result = validateEnvironment({
+      ...validConfig,
+      CALL_EVENTS_BASE_URL: 'http://express-api:5001',
+      CALL_EVENTS_INTERNAL_TOKEN: 'a-test-internal-token',
+    });
+
+    expect(result['CALL_EVENTS_BASE_URL']).toBe('http://express-api:5001');
+  });
+
 });
