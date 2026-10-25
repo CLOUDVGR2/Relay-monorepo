@@ -225,3 +225,37 @@ export class ConversationMessagesInput {
   @IsUUID()
   before?: string;
 }
+
+// Represent one task extracted from an authorized conversation transcript.
+@ObjectType()
+export class ConversationActionItemType {
+  @Field()
+  task!: string;
+
+  @Field(() => String, { nullable: true })
+  owner!: string | null;
+
+  @Field(() => String, { nullable: true })
+  due_date!: string | null;
+}
+
+// Return the structured analysis produced by the internal AI service.
+@ObjectType()
+export class ConversationAnalysisType {
+  @Field()
+  summary!: string;
+
+  @Field(() => [String])
+  decisions!: string[];
+
+  @Field(() => [ConversationActionItemType])
+  action_items!: ConversationActionItemType[];
+}
+
+// Accept only a conversation ID; transcript content must be loaded server-side.
+@InputType()
+export class SummarizeConversationInput {
+  @Field(() => ID)
+  @IsUUID()
+  conversationId!: string;
+}

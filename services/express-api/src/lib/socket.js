@@ -46,6 +46,21 @@ const io = new Server(server, {
   },
 });
 
+// Temporary Engine.IO diagnostics. Never log session IDs or credentials.
+io.engine.on("connection_error", (err) => {
+  const url = err.req?.url ?? "";
+  console.warn("[Socket.IO Engine] Connection error:", {
+    code: err.code,
+    message: err.message,
+    transport: url.includes("transport=websocket")
+      ? "websocket"
+      : url.includes("transport=polling")
+        ? "polling"
+        : "unknown",
+    method: err.req?.method,
+  });
+});
+
 // -----------------------------------------------------------------------------
 // Connection tracking
 // -----------------------------------------------------------------------------
@@ -196,6 +211,26 @@ io.on("connection", (socket) => {
 
   // Join the user's private room for delivery to all their devices.
   socket.join(getUserRoom(userId));
+
+  // Relay typing state to the recipient's private room.
+  socket.on("typing", (payload) => {
+    const recipientId = payload?.recipientId;
+    const isTyping = payload?.isTyping;
+
+    if (
+      typeof recipientId !== "string" ||
+      !mongoose.isValidObjectId(recipientId) ||
+      recipientId === userId ||
+      typeof isTyping !== "boolean"
+    ) {
+      return;
+    }
+
+    socket.to(getUserRoom(recipientId)).emit("userTyping", {
+      userId,
+      isTyping,
+    });
+  });
 
   // Broadcast the current set of online user IDs.
   io.emit("getOnlineUsers", getOnlineUserIds());

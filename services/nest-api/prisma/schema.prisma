@@ -7,7 +7,7 @@ generator client {
   provider = "prisma-client"
 
   // Keep generated files inside src for the NestJS build.
-  output = "../src/generated/prisma"
+  output        = "../src/generated/prisma"
   binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
 }
 
@@ -67,6 +67,10 @@ model Conversation {
   participants ConversationParticipant[]
 
   /// Use "conversations" as the actual PostgreSQL table name.
+  tasks Task[]
+
+  calls CallSession[]
+
   @@map("conversations")
 }
 
@@ -104,6 +108,8 @@ model ChatMessage {
 
   /// Speeds up queries that retrieve messages for a conversation
   /// in chronological order.
+  tasks Task[]
+
   @@index([conversationId, createdAt(sort: Desc), id(sort: Desc)], map: "chat_messages_conversationId_createdAt_id_idx")
   /// Helps queries that filter messages by sender.
   @@index([senderId])
@@ -142,4 +148,152 @@ model ConversationParticipant {
   @@index([userId])
   /// Use "conversation_participants" as the PostgreSQL table name.
   @@map("conversation_participants")
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Task {
+  id              String       @id @default(uuid()) @db.Uuid
+  conversationId  String       @db.Uuid
+  sourceMessageId String?      @db.Uuid
+  title           String       @db.VarChar(200)
+  description     String?      @db.Text
+  creatorId       String
+  assigneeId      String?
+  dueDate         DateTime?
+  priority        TaskPriority @default(MEDIUM)
+  status          TaskStatus   @default(TODO)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  conversation   Conversation        @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sourceMessage  ChatMessage?        @relation(fields: [sourceMessageId], references: [id], onDelete: SetNull)
+  checklistItems TaskChecklistItem[]
+  activities     TaskActivity[]
+  links          TaskLink[]
+
+  @@index([conversationId, status, createdAt])
+  @@index([assigneeId, status, dueDate])
+  @@index([sourceMessageId])
+  @@map("tasks")
+}
+
+/// A bounded checklist entry belonging to a task.
+model TaskChecklistItem {
+  id        String   @id @default(uuid()) @db.Uuid
+  taskId    String   @db.Uuid
+  text      String   @db.VarChar(500)
+  completed Boolean  @default(false)
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, position])
+  @@map("task_checklist_items")
+}
+
+/// Records task changes without copying sensitive message contents.
+model TaskActivity {
+  id          String   @id @default(uuid()) @db.Uuid
+  taskId      String   @db.Uuid
+  actorId     String
+  action      String   @db.VarChar(50)
+  description String?  @db.VarChar(500)
+  createdAt   DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+  @@index([actorId, createdAt])
+  @@map("task_activities")
+}
+
+/// A validated external URL shared with a task.
+model TaskLink {
+  id        String   @id @default(uuid()) @db.Uuid
+  taskId    String   @db.Uuid
+  url       String   @db.VarChar(2048)
+  title     String?  @db.VarChar(200)
+  creatorId String
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+  @@map("task_links")
+}
+
+enum CallType {
+  AUDIO
+  VIDEO
+}
+
+enum CallStatus {
+  RINGING
+  ACTIVE
+  ENDED
+  CANCELLED
+}
+
+enum CallParticipantStatus {
+  INVITED
+  RINGING
+  ACCEPTED
+  DECLINED
+  MISSED
+  LEFT
+}
+
+/// Persistent metadata for an audio or video call.
+model CallSession {
+  id             String     @id @default(uuid()) @db.Uuid
+  conversationId String     @db.Uuid
+  initiatorId    String
+  type           CallType
+  status         CallStatus @default(RINGING)
+  startedAt      DateTime?
+  answeredAt     DateTime?
+  endedAt        DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  conversation Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  participants CallParticipant[]
+
+  @@index([conversationId, createdAt(sort: Desc)])
+  @@index([status, createdAt])
+  @@map("call_sessions")
+}
+
+/// Stores each invitee's response and participation history.
+model CallParticipant {
+  id          String                @id @default(uuid()) @db.Uuid
+  callId      String                @db.Uuid
+  userId      String
+  status      CallParticipantStatus @default(INVITED)
+  invitedAt   DateTime              @default(now())
+  respondedAt DateTime?
+  joinedAt    DateTime?
+  leftAt      DateTime?
+
+  call CallSession @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@unique([callId, userId])
+  @@index([userId, invitedAt(sort: Desc)])
+  @@index([callId, status])
+  @@map("call_participants")
 }

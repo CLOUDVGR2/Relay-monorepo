@@ -13,8 +13,11 @@ import { redis } from "./lib/redis.js";
 
 import authRoutes from "./routes/auth.route.js";
 import messageRoutes from "./routes/message.route.js";
+import notificationRoutes from "./routes/notification.route.js";
 import incidentRoutes from "./routes/incidents.route.js";
 import aiRoutes from "./routes/ai.route.js";
+import { createInternalCallEventsRouter } from "./routes/internal-call-events.route.js";
+import { io, getUserRoom } from "./lib/socket.js";
 
 // Express configuration
 // -----------------------------------------------------------------------------
@@ -250,8 +253,14 @@ setupSwagger(app);
 // API routes
 // -----------------------------------------------------------------------------
 
+app.use(
+  "/internal",
+  createInternalCallEventsRouter({ io, getUserRoom }),
+);
+
 app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
+app.use("/api/notifications", notificationRoutes);
 app.use("/api/incidents", incidentRoutes);
 app.use("/api/ai", aiRoutes);
 
