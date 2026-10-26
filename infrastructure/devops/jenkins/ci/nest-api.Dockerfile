@@ -1,17 +1,22 @@
 FROM node:22-alpine
+WORKDIR /workspace
 
-WORKDIR /app
+RUN corepack enable
 
-COPY package*.json ./
-RUN npm ci
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY services/nest-api/package.json services/nest-api/package.json
+
+RUN pnpm install --filter @relay/nest-api... --frozen-lockfile
 
 COPY . .
 
-RUN DATABASE_URL="postgresql://build:build@localhost:5432/build" npx prisma generate
+WORKDIR /workspace/services/nest-api
 
-RUN npm run lint && npm run build
+RUN DATABASE_URL="postgresql://build:build@localhost:5432/build" \
+    pnpm exec prisma generate
 
-RUN chown -R node:node /app
-USER node
+RUN pnpm run lint && pnpm run build
 
-CMD ["npm", "test"]
+WORKDIR /workspace
+
+CMD ["pnpm", "--filter", "@relay/nest-api", "run", "test"]

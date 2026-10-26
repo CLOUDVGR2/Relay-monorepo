@@ -1,10 +1,17 @@
 FROM node:22-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run lint && npm test && npm run build
-RUN chown -R node:node /app
-USER node
+WORKDIR /workspace
 
-CMD ["sh", "-c", "echo 'Frontend CI checks passed'"]
+RUN corepack enable
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/web/package.json apps/web/package.json
+
+RUN pnpm install --filter @relay/web... --frozen-lockfile
+
+COPY . .
+
+RUN pnpm --filter @relay/web run lint \
+    && pnpm --filter @relay/web run test \
+    && pnpm --filter @relay/web run build
+
+CMD ["pnpm", "--filter", "@relay/web", "run", "test"]
