@@ -1,4 +1,4 @@
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 WORKDIR /workspace
@@ -26,7 +26,7 @@ RUN mkdir -p dist/generated/prisma \
  && test -n "$(find dist/generated/prisma -maxdepth 1 -type f \
       -name 'libquery_engine-*.so.node' -print -quit)"
 
-FROM node:22-alpine AS production-dependencies
+FROM node:26-alpine AS production-dependencies
 
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 WORKDIR /workspace
@@ -38,7 +38,7 @@ COPY services/nest-api/package.json services/nest-api/package.json
 
 RUN pnpm install --filter @relay/nest-api... --prod --frozen-lockfile
 
-FROM node:22-alpine AS runtime
+FROM node:26-alpine AS runtime
 
 ENV NODE_ENV=production \
     PORT=3000
