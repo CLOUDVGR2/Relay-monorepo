@@ -1,5 +1,6 @@
-FROM node:22-alpine AS builder
+FROM node:22-alpine AS build
 
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 WORKDIR /workspace
 
 RUN corepack enable
@@ -9,18 +10,20 @@ COPY services/express-api/package.json services/express-api/package.json
 
 RUN pnpm install --filter @relay/express-api... --prod --frozen-lockfile
 
-COPY services/express-api services/express-api
+COPY services/express-api/src services/express-api/src
 
 FROM node:22-alpine AS runtime
 
-RUN addgroup -S -g 10001 app && adduser -S -D -H -u 10001 -G app app
+ENV NODE_ENV=production \
+    PORT=5001
+
+RUN addgroup -S -g 10001 app \
+ && adduser -S -D -H -u 10001 -G app app
 
 WORKDIR /workspace
 
-ENV NODE_ENV=production
-
-COPY --from=builder --chown=10001:10001 /workspace/node_modules ./node_modules
-COPY --from=builder --chown=10001:10001 /workspace/services/express-api ./services/express-api
+COPY --from=build --chown=10001:10001 /workspace/node_modules ./node_modules
+COPY --from=build --chown=10001:10001 /workspace/services/express-api ./services/express-api
 
 WORKDIR /workspace/services/express-api
 

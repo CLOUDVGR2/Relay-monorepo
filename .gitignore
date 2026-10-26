@@ -100,3 +100,4 @@ apps/mobile/*.mobileprovision
 /cookies.txt
 /apps/mobile/google-services.json
 /gitleaks-redacted-report.json
+/apps/mobile/audit.json

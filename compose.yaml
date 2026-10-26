@@ -8,43 +8,17 @@ services:
       - "127.0.0.1:27018:27017"
     volumes:
       - mongodb_data:/data/db
+    networks:
+      - relay-network
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
-
-  rabbitmq:
-    image: rabbitmq:4-management-alpine
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:5672:5672"
-      - "127.0.0.1:15672:15672"
-    environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?Set RABBITMQ_DEFAULT_USER in .env}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Set RABBITMQ_DEFAULT_PASS in .env}
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 20s
-
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 5s
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
 
   postgres:
     image: pgvector/pgvector:pg17
@@ -57,22 +31,106 @@ services:
       - "127.0.0.1:5433:5432"
     volumes:
       - atlas_postgres_data:/var/lib/postgresql/data
+    networks:
+      - relay-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U atlas_ai -d atlas_ai"]
       interval: 10s
       timeout: 5s
       retries: 6
-      start_period: 15s
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - relay-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?Set RABBITMQ_DEFAULT_USER in root .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Set RABBITMQ_DEFAULT_PASS in root .env}
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - relay-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 768m
+
+  ai-service:
+    image: relay-monorepo-ai-service:local
+    build:
+      context: ./services/ai-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      CLIENT_URL: http://localhost:5173,http://127.0.0.1:5173,http://localhost:8088,http://127.0.0.1:8088
+      DATABASE_URL: "postgresql+asyncpg://atlas_ai:${ATLAS_POSTGRES_PASSWORD:?Set ATLAS_POSTGRES_PASSWORD in root .env}@postgres:5432/atlas_ai"
+      PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?Set PYTHON_AI_INTERNAL_TOKEN in root .env}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      AI_PROVIDER: ${AI_PROVIDER:-litellm}
+      LITELLM_MODEL: ${LITELLM_MODEL:-ollama_chat/qwen2.5:3b-instruct}
+      LITELLM_API_BASE: ${LITELLM_API_BASE:-http://host.docker.internal:11434}
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks:
+      - relay-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 150
 
   express-api:
+    image: relay-monorepo-express-api:local
     build:
       context: .
       dockerfile: services/express-api/Dockerfile
-    image: relay-monorepo-express-api:local
     restart: unless-stopped
+    init: true
     environment:
       NODE_ENV: production
-      PORT: 5001
+      PORT: "5001"
       MONGODB_URI: mongodb://mongodb:27017/relay
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in root .env}
       REDIS_URL: redis://redis:6379
@@ -84,7 +142,9 @@ services:
       PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?Set PYTHON_AI_INTERNAL_TOKEN in root .env}
       CALL_EVENTS_INTERNAL_TOKEN: ${CALL_EVENTS_INTERNAL_TOKEN:?Set CALL_EVENTS_INTERNAL_TOKEN in root .env}
     ports:
-      - "0.0.0.0:5001:5001"
+      - "127.0.0.1:5001:5001"
+    networks:
+      - relay-network
     depends_on:
       mongodb:
         condition: service_healthy
@@ -92,18 +152,23 @@ services:
         condition: service_healthy
       ai-service:
         condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 200
 
   nest-api:
+    image: relay-monorepo-nest-api:local
     build:
       context: .
       dockerfile: services/nest-api/Dockerfile
-    image: relay-monorepo-nest-api:local
     restart: unless-stopped
+    init: true
     environment:
       NODE_ENV: production
       CLIENT_URL: http://localhost:5173,http://127.0.0.1:5173,http://localhost:8088,http://127.0.0.1:8088
-      PORT: 3000
-      DATABASE_URL: postgresql://atlas_ai:${ATLAS_POSTGRES_PASSWORD:?Set ATLAS_POSTGRES_PASSWORD in root .env}@postgres:5432/atlas_ai
+      PORT: "3000"
+      DATABASE_URL: "postgresql://atlas_ai:${ATLAS_POSTGRES_PASSWORD:?Set ATLAS_POSTGRES_PASSWORD in root .env}@postgres:5432/atlas_ai"
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in root .env}
       REDIS_URL: redis://redis:6379
       MONGODB_URI: mongodb://mongodb:27017/relay
@@ -115,6 +180,8 @@ services:
       CALL_EVENTS_INTERNAL_TOKEN: ${CALL_EVENTS_INTERNAL_TOKEN:?Set CALL_EVENTS_INTERNAL_TOKEN in root .env}
     ports:
       - "127.0.0.1:3000:3000"
+    networks:
+      - relay-network
     depends_on:
       postgres:
         condition: service_healthy
@@ -122,45 +189,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-
-  frontend:
-    image: relay-monorepo-web:local
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:8088:8080"
-    depends_on:
-      - express-api
-      - nest-api
-
-  jobs-worker:
-    build:
-      context: ./services/jobs-worker
-      dockerfile: Dockerfile
-    image: relay-monorepo-jobs-worker:local
-    restart: unless-stopped
-    init: true
-    environment:
-      REDIS_URL: redis://redis:6379
-      RABBITMQ_HOST: rabbitmq:5672
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?Set RABBITMQ_DEFAULT_USER in .env}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Set RABBITMQ_DEFAULT_PASS in .env}
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    read_only: true
     security_opt:
       - no-new-privileges:true
-    cap_drop:
-      - ALL
-    mem_limit: 256m
-    pids_limit: 100
-    stop_grace_period: 35s
-
+    mem_limit: 512m
+    pids_limit: 200
 
   jobs-api:
     image: relay-monorepo-jobs-api:local
@@ -175,10 +207,12 @@ services:
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Set INTERNAL_API_TOKEN in root .env}
       REDIS_URL: redis://redis:6379
       RABBITMQ_HOST: rabbitmq:5672
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?Set RABBITMQ_DEFAULT_USER in .env}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Set RABBITMQ_DEFAULT_PASS in .env}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?Set RABBITMQ_DEFAULT_USER in root .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Set RABBITMQ_DEFAULT_PASS in root .env}
     ports:
       - "127.0.0.1:8083:8081"
+    networks:
+      - relay-network
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -192,7 +226,33 @@ services:
     mem_limit: 128m
     pids_limit: 100
 
-
+  jobs-worker:
+    image: relay-monorepo-jobs-worker:local
+    build:
+      context: ./services/jobs-worker
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_HOST: rabbitmq:5672
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?Set RABBITMQ_DEFAULT_USER in root .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Set RABBITMQ_DEFAULT_PASS in root .env}
+    networks:
+      - relay-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    pids_limit: 100
+    stop_grace_period: 35s
 
   api-gateway:
     image: relay-monorepo-api-gateway:local
@@ -208,16 +268,24 @@ services:
       GATEWAY_GO_URL: http://jobs-api:8081
       GATEWAY_PYTHON_URL: http://ai-service:8000
     ports:
-      - "8090:8090"
+      - "127.0.0.1:8090:8090"
+    networks:
+      - relay-network
     depends_on:
-      - express-api
-      - nest-api
+      express-api:
+        condition: service_started
+      nest-api:
+        condition: service_started
+      jobs-api:
+        condition: service_started
+      ai-service:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8090/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      start_period: 10s
     read_only: true
     security_opt:
       - no-new-privileges:true
@@ -226,49 +294,37 @@ services:
     mem_limit: 128m
     pids_limit: 100
 
-  ai-service:
+  frontend:
+    image: relay-monorepo-web:local
     build:
-      context: ./services/ai-service
-      dockerfile: Dockerfile
-    image: relay-monorepo-ai-service:local
+      context: .
+      dockerfile: apps/web/Dockerfile
     restart: unless-stopped
-    init: true
-    environment:
-      CLIENT_URL: http://localhost:5173,http://127.0.0.1:5173,http://localhost:8088,http://127.0.0.1:8088
-      DATABASE_URL: "postgresql+asyncpg://atlas_ai:${ATLAS_POSTGRES_PASSWORD:?Set ATLAS_POSTGRES_PASSWORD in root .env}@postgres:5432/atlas_ai"
-      PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?Set PYTHON_AI_INTERNAL_TOKEN in root .env}
-      OLLAMA_BASE_URL: "http://host.docker.internal:11434"
-      AI_PROVIDER: ${AI_PROVIDER:-litellm}
-      LITELLM_MODEL: ${LITELLM_MODEL:-ollama_chat/qwen2.5:3b-instruct}
-      LITELLM_API_BASE: ${LITELLM_API_BASE:-http://host.docker.internal:11434}
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8088:8080"
+    networks:
+      - relay-network
     depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=3)"
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    mem_limit: 512m
-    pids_limit: 100
+      express-api:
+        condition: service_started
+      nest-api:
+        condition: service_started
+      jobs-api:
+        condition: service_started
+      api-gateway:
+        condition: service_started
+
+networks:
+  relay-network:
+    name: relay-monorepo_network
+    driver: bridge
 
 volumes:
   mongodb_data:
     name: relay-monorepo_mongodb_data
-  rabbitmq_data:
-    name: relay-monorepo_rabbitmq_data
-  redis_data:
-    name: relay-monorepo_redis_data
   atlas_postgres_data:
     name: relay-monorepo_atlas_postgres_data
+  redis_data:
+    name: relay-monorepo_redis_data
+  rabbitmq_data:
+    name: relay-monorepo_rabbitmq_data

@@ -11,6 +11,7 @@ const TEST_SECRET =
 const INTERNAL_TOKEN =
   "call-events-integration-internal-token-only";
 const TEST_MONGO_URI =
+  process.env.EXPRESS_TEST_MONGO_URI ||
   "mongodb://127.0.0.1:27018/relay_call_events_integration_test";
 
 let socketModule;

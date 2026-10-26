@@ -1,5 +1,6 @@
-FROM node:22-alpine AS builder
+FROM node:22-alpine AS build
 
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 WORKDIR /workspace
 
 RUN corepack enable
@@ -13,26 +14,27 @@ COPY . .
 
 RUN pnpm --filter @relay/web run build
 
-FROM nginx:alpine
+FROM nginx:1.28-alpine AS runtime
 
-# Use a writable PID path when running Nginx as a non-root user.
 RUN sed -i 's#^pid .*;#pid /tmp/nginx.pid;#' /etc/nginx/nginx.conf \
-    && grep -q '^pid /tmp/nginx.pid;' /etc/nginx/nginx.conf
+ && mkdir -p \
+      /var/cache/nginx/client_temp \
+      /var/cache/nginx/proxy_temp \
+      /var/cache/nginx/fastcgi_temp \
+      /var/cache/nginx/uwsgi_temp \
+      /var/cache/nginx/scgi_temp \
+ && chown -R 101:101 /var/cache/nginx \
+ && touch /tmp/nginx.pid \
+ && chown 101:101 /tmp/nginx.pid
 
-COPY --from=builder /workspace/apps/web/dist /usr/share/nginx/html
-COPY --from=builder /workspace/apps/web/nginx.conf /etc/nginx/conf.d/default.conf
-
-RUN mkdir -p /var/cache/nginx/client_temp \
-    /var/cache/nginx/proxy_temp \
-    /var/cache/nginx/fastcgi_temp \
-    /var/cache/nginx/uwsgi_temp \
-    /var/cache/nginx/scgi_temp \
-    && chown -R 101:101 /var/cache/nginx \
-    && touch /tmp/nginx.pid \
-    && chown 101:101 /tmp/nginx.pid
+COPY --from=build /workspace/apps/web/dist /usr/share/nginx/html
+COPY --from=build /workspace/apps/web/nginx.conf /etc/nginx/conf.d/default.conf
 
 USER 101:101
 
 EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]

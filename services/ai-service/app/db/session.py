@@ -14,7 +14,15 @@ from sqlalchemy.ext.asyncio import (
 )
 
 # Load the repository-level .env without printing or overriding existing variables.
-REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
+def find_repository_root() -> Path:
+    source = Path(__file__).resolve()
+    for directory in source.parents:
+        if (directory / "pnpm-workspace.yaml").is_file():
+            return directory
+    return Path("/app")
+
+
+REPOSITORY_ROOT = find_repository_root()
 load_dotenv(REPOSITORY_ROOT / ".env", override=False)
 
 database_url = os.getenv("DATABASE_URL")

@@ -1,25 +1,26 @@
-FROM golang:1.27.3-alpine AS builder
+FROM golang:1.27.3-alpine AS build
 
 WORKDIR /src
+RUN apk add --no-cache ca-certificates
 
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
 
-RUN mkdir -p /out && CGO_ENABLED=0 GOOS=linux \
-    go build -trimpath -ldflags="-s -w" \
-    -o /out/go-worker .
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /out/jobs-worker .
 
-FROM alpine:3.22
+FROM alpine:3.22 AS runtime
 
 RUN apk add --no-cache ca-certificates \
-    && addgroup -S -g 10001 app \
-    && adduser -S -D -H -u 10001 -G app app
+ && addgroup -S -g 10001 app \
+ && adduser -S -D -H -u 10001 -G app app
 
-COPY --from=builder --chown=app:app \
-    /out/go-worker /usr/local/bin/go-worker
+COPY --from=build --chown=10001:10001 /out/jobs-worker /usr/local/bin/jobs-worker
 
 USER 10001:10001
 
-ENTRYPOINT ["/usr/local/bin/go-worker"]
+ENTRYPOINT ["/usr/local/bin/jobs-worker"]

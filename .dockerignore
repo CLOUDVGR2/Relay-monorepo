@@ -15,3 +15,28 @@
 .DS_Store
 .vscode/
 .idea/
+
+# pnpm and Node package-manager caches
+**/.pnpm-store/
+**/.npm/
+**/.cache/
+
+# Mobile native build output — not needed for the web image
+apps/mobile/android/.gradle/
+apps/mobile/android/.cxx/
+apps/mobile/android/app/build/
+apps/mobile/android/build/
+apps/mobile/ios/Pods/
+apps/mobile/ios/build/
+apps/mobile/.expo/
+
+# Generated frontend and test artifacts
+**/.next/
+**/.vite/
+**/playwright-report/
+**/test-results/
+
+# Local reports and temporary files
+**/*.log
+**/.DS_Store
+/apps/mobile/audit.json
