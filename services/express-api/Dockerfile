@@ -1,4 +1,4 @@
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 WORKDIR /workspace
@@ -12,7 +12,7 @@ RUN pnpm install --filter @relay/express-api... --prod --frozen-lockfile
 
 COPY services/express-api/src services/express-api/src
 
-FROM node:22-alpine AS runtime
+FROM node:26-alpine AS runtime
 
 ENV NODE_ENV=production \
     PORT=5001
