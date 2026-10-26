@@ -19,4 +19,8 @@ RUN pnpm run lint && pnpm run build
 
 WORKDIR /workspace
 
+# Prisma generation and compilation run before dropping privileges.
+RUN chown -R node:node /workspace
+USER node
+
 CMD ["pnpm", "--filter", "@relay/nest-api", "run", "test"]

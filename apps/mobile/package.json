@@ -9,7 +9,7 @@
     "ios": "expo run:ios",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "audit": "npm audit"
+    "audit": "pnpm audit"
   },
   "dependencies": {
     "@react-navigation/bottom-tabs": "^7.4.7",

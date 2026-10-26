@@ -7,7 +7,7 @@
     "dev": "node --watch src/bootstrap.js",
     "start": "node src/bootstrap.js",
     "build": "echo 'No build step required for Node.js backend'",
-    "test:integration": "node --test tests/*.test.js"
+    "test:integration": "node --test tests/*.test.js tests/*.integration.js"
   },
   "keywords": [
     "express",

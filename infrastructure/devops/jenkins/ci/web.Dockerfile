@@ -14,4 +14,8 @@ RUN pnpm --filter @relay/web run lint \
     && pnpm --filter @relay/web run test \
     && pnpm --filter @relay/web run build
 
+# The CI test command runs as the unprivileged Node.js user.
+RUN chown -R node:node /workspace
+USER node
+
 CMD ["pnpm", "--filter", "@relay/web", "run", "test"]
