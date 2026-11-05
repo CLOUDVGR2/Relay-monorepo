@@ -49,6 +49,8 @@ export function createInternalCallEventsRouter({
   io,
   getUserRoom,
   getToken = () => process.env.CALL_EVENTS_INTERNAL_TOKEN,
+  invalidateCallMediaSession = () => {},
+  createIncomingCallNotifications = async () => {},
 }) {
   if (!io || typeof io.to !== "function") {
     throw new TypeError("A Socket.IO server is required.");
@@ -144,6 +146,38 @@ export function createInternalCallEventsRouter({
     }
 
     target.emit("callEvent", payload);
+
+    // Push only for new audio-call invitations. Do not send pushes for
+    // updates, cancellations, terminal events, or video calls.
+    if (
+      payload.eventType === "invitation" &&
+      payload.status === "RINGING" &&
+      payload.type === "AUDIO"
+    ) {
+      console.info("[IncomingCallPush] Audio invitation received", {
+        callId: payload.callId,
+        recipientCount: payload.participantIds.length - 1,
+      });
+
+      const inviteeIds = payload.participantIds.filter(
+        (id) => id !== payload.initiatorId.toLowerCase(),
+      );
+
+      void Promise.resolve(
+        createIncomingCallNotifications({
+          callerId: payload.initiatorId,
+          recipientIds: inviteeIds,
+          callId: payload.callId,
+          conversationId: payload.conversationId,
+        }),
+      ).catch((error) => {
+        console.error("Incoming-call push dispatch failed:", error?.message);
+      });
+    }
+
+    if (payload.status === "ENDED" || payload.status === "CANCELLED") {
+      invalidateCallMediaSession(payload.callId);
+    }
 
     return res.status(202).json({ success: true });
   };

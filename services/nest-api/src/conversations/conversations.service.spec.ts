@@ -20,8 +20,12 @@ describe('ConversationsService', () => {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
     },
+    $queryRaw: vi.fn(),
+    $transaction: vi.fn(),
     conversationParticipant: {
       createMany: vi.fn(),
+      findFirst: vi.fn(),
+      updateMany: vi.fn(),
     },
     chatMessage: {
       findMany: vi.fn(),
@@ -40,6 +44,14 @@ describe('ConversationsService', () => {
 
     // Inject the mocked Prisma client into the service.
     authUsers.findExistingUserIds.mockImplementation(async (ids: string[]) => ids);
+    prisma.$transaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          $queryRaw: prisma.$queryRaw,
+          conversation: prisma.conversation,
+          conversationParticipant: prisma.conversationParticipant,
+        }),
+    );
     service = new ConversationsService(
       prisma as unknown as PrismaService,
       authUsers as unknown as AuthUserService,
@@ -63,7 +75,7 @@ describe('ConversationsService', () => {
 
       // Verify only participants are included in the conversation list.
       expect(prisma.conversation.findMany).toHaveBeenCalledWith({
-        where: { participants: { some: { userId } } },
+        where: { participants: { some: { userId, hiddenAt: null } } },
         orderBy: { createdAt: 'desc' },
         include: {
           participants: {
@@ -71,6 +83,38 @@ describe('ConversationsService', () => {
           },
         },
       });
+    });
+  });
+
+  describe('hideConversation', () => {
+    it('hides only the authenticated participant membership', async () => {
+      prisma.conversationParticipant.findFirst.mockResolvedValue({
+        id: 'membership-1',
+      });
+      prisma.conversationParticipant.updateMany.mockResolvedValue({ count: 1 });
+
+      await expect(
+        service.hideConversation('conversation-1', userId),
+      ).resolves.toBe(true);
+
+      expect(prisma.conversationParticipant.updateMany).toHaveBeenCalledWith({
+        where: {
+          conversationId: 'conversation-1',
+          userId: 'user-1',
+          hiddenAt: null,
+        },
+        data: { hiddenAt: expect.any(Date) },
+      });
+    });
+
+    it('does not hide a conversation for a non-member', async () => {
+      prisma.conversationParticipant.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.hideConversation('conversation-1', userId),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(prisma.conversationParticipant.updateMany).not.toHaveBeenCalled();
     });
   });
 
@@ -85,7 +129,10 @@ describe('ConversationsService', () => {
       prisma.conversation.create.mockResolvedValue(conversation);
 
       // Verify the service returns the created conversation.
-      await expect(service.create(userId, ['user-2'])).resolves.toEqual(conversation);
+      await expect(service.create(userId, ['user-2'])).resolves.toEqual({
+        ...conversation,
+        created: true,
+      });
 
       // Verify Prisma creates the conversation and includes participants only.
       expect(prisma.conversation.create).toHaveBeenCalledWith({
@@ -103,6 +150,46 @@ describe('ConversationsService', () => {
           },
         },
       });
+    });
+    it('should reuse an existing unnamed direct conversation', async () => {
+      const existingConversation = {
+        id: 'existing-direct-conversation',
+        participants: [
+          { userId: 'user-1', role: 'ADMIN' },
+          { userId: 'user-2', role: 'MEMBER' },
+        ],
+      };
+
+      prisma.conversation.findFirst.mockResolvedValue(existingConversation);
+
+      await expect(
+        service.create(userId, ['user-2']),
+      ).resolves.toEqual({
+        ...existingConversation,
+        created: false,
+      });
+
+      expect(prisma.conversation.findFirst).toHaveBeenCalledWith({
+        where: {
+          AND: [
+            { participants: { some: { userId: 'user-1' } } },
+            { participants: { some: { userId: 'user-2' } } },
+            {
+              participants: {
+                every: { userId: { in: ['user-1', 'user-2'] } },
+              },
+            },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          participants: { orderBy: { joinedAt: 'asc' } },
+        },
+      });
+
+      expect(prisma.conversation.create).not.toHaveBeenCalled();
+      expect(prisma.$transaction).toHaveBeenCalledOnce();
+      expect(prisma.$queryRaw).toHaveBeenCalledOnce();
     });
   });
 

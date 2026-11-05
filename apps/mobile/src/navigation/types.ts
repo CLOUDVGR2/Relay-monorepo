@@ -9,7 +9,9 @@ export type RelayUser = {
 // Keep every stack destination and its parameters in one place.
 export type RootStackParamList = {
   Conversations: undefined;
+  Calls: { callId?: string } | undefined;
   Tasks: undefined;
+  MultiAgentTasks: undefined;
   Conversation: { person: RelayUser };
   AI: undefined;
   ActivityInbox: undefined;

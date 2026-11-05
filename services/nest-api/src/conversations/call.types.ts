@@ -1,4 +1,4 @@
-/** GraphQL types and validated inputs for audio/video call sessions. */
+/** GraphQL types and validated inputs for audio-only call sessions. */
 
 import {
   Field,
@@ -13,6 +13,7 @@ import {
   ArrayMaxSize,
   ArrayUnique,
   IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
   IsMongoId,
@@ -22,9 +23,16 @@ import {
   Min,
 } from 'class-validator';
 
+import { GraphQLJSON } from 'graphql-type-json';
+import {
+  CallAudioTrackKind,
+  CallRecordingStatus,
+  CallSummaryStatus,
+  CallTranscriptStatus,
+} from '../generated/prisma/enums.js';
+
 export enum CallMediaType {
   AUDIO = 'AUDIO',
-  VIDEO = 'VIDEO',
 }
 
 export enum CallSessionStatus {
@@ -46,6 +54,11 @@ export enum CallInviteStatus {
 registerEnumType(CallMediaType, { name: 'CallType' });
 registerEnumType(CallSessionStatus, { name: 'CallStatus' });
 registerEnumType(CallInviteStatus, { name: 'CallParticipantStatus' });
+registerEnumType(CallRecordingStatus, { name: 'CallRecordingStatus' });
+registerEnumType(CallAudioTrackKind, { name: 'CallAudioTrackKind' });
+registerEnumType(CallTranscriptStatus, { name: 'CallTranscriptStatus' });
+registerEnumType(CallSummaryStatus, { name: 'CallSummaryStatus' });
+
 
 @ObjectType()
 export class CallParticipantType {
@@ -64,6 +77,12 @@ export class CallParticipantType {
   @Field(() => GraphQLISODateTime, { nullable: true })
   respondedAt!: Date | null;
 
+  @Field(() => Boolean, { nullable: true })
+  recordingConsent!: boolean | null;
+
+  @Field(() => GraphQLISODateTime, { nullable: true })
+  recordingConsentAt!: Date | null;
+
   @Field(() => GraphQLISODateTime, { nullable: true })
   joinedAt!: Date | null;
 
@@ -72,7 +91,110 @@ export class CallParticipantType {
 }
 
 @ObjectType()
+export class CallTranscriptType {
+  @Field(() => ID)
+  id!: string;
+
+  @Field(() => CallTranscriptStatus)
+  status!: CallTranscriptStatus;
+
+  @Field(() => String, { nullable: true })
+  text!: string | null;
+
+  @Field(() => String, { nullable: true })
+  language!: string | null;
+
+  @Field(() => GraphQLISODateTime)
+  createdAt!: Date;
+
+  @Field(() => GraphQLISODateTime)
+  updatedAt!: Date;
+}
+
+@ObjectType()
+export class CallRecordingTrackType {
+  @Field(() => ID)
+  id!: string;
+
+  @Field(() => CallAudioTrackKind)
+  kind!: CallAudioTrackKind;
+
+  @Field()
+  contentType!: string;
+
+  @Field(() => Int)
+  sampleRate!: number;
+
+  @Field(() => Int)
+  channels!: number;
+
+  @Field(() => Int)
+  durationMs!: number;
+
+  @Field(() => CallTranscriptType, { nullable: true })
+  transcript!: CallTranscriptType | null;
+}
+
+@ObjectType()
+export class CallRecordingType {
+  @Field(() => ID)
+  id!: string;
+
+  @Field(() => CallRecordingStatus)
+  status!: CallRecordingStatus;
+
+  @Field(() => GraphQLISODateTime, { nullable: true })
+  uploadedAt!: Date | null;
+
+  @Field(() => GraphQLISODateTime, { nullable: true })
+  processedAt!: Date | null;
+
+  @Field(() => [CallRecordingTrackType])
+  tracks!: CallRecordingTrackType[];
+
+  @Field(() => GraphQLISODateTime)
+  createdAt!: Date;
+
+  @Field(() => GraphQLISODateTime)
+  updatedAt!: Date;
+}
+
+@ObjectType()
+export class CallSummaryType {
+  @Field(() => ID)
+  id!: string;
+
+  @Field(() => CallSummaryStatus)
+  status!: CallSummaryStatus;
+
+  @Field(() => String, { nullable: true })
+  summary!: string | null;
+
+  @Field(() => GraphQLJSON, { nullable: true })
+  keyPoints!: unknown | null;
+
+  @Field(() => GraphQLJSON, { nullable: true })
+  actionItems!: unknown | null;
+
+  @Field(() => String, { nullable: true })
+  failureCode!: string | null;
+
+  @Field(() => GraphQLISODateTime, { nullable: true })
+  generatedAt!: Date | null;
+
+  @Field(() => GraphQLISODateTime)
+  createdAt!: Date;
+
+  @Field(() => GraphQLISODateTime)
+  updatedAt!: Date;
+}
+
+@ObjectType()
 export class CallSessionType {
+  // Indicates whether this mutation created a new call.
+  @Field(() => Boolean, { nullable: true })
+  created?: boolean;
+
   @Field(() => ID)
   id!: string;
 
@@ -105,6 +227,12 @@ export class CallSessionType {
 
   @Field(() => [CallParticipantType])
   participants!: CallParticipantType[];
+
+  @Field(() => CallRecordingType, { nullable: true })
+  recording!: CallRecordingType | null;
+
+  @Field(() => CallSummaryType, { nullable: true })
+  summary!: CallSummaryType | null;
 }
 
 @InputType()
@@ -128,6 +256,23 @@ export class CreateCallInput {
   @ArrayMaxSize(49)
   @IsMongoId({ each: true })
   participantIds?: string[];
+
+  @Field(() => Boolean, { nullable: true, defaultValue: false })
+  @IsOptional()
+  @IsBoolean()
+  recordingConsent?: boolean;
+}
+
+@InputType()
+export class AcceptCallInput {
+  @Field(() => ID)
+  @IsUUID()
+  callId!: string;
+
+  @Field(() => Boolean, { nullable: true, defaultValue: false })
+  @IsOptional()
+  @IsBoolean()
+  recordingConsent?: boolean;
 }
 
 @InputType()

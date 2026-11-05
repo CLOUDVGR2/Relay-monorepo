@@ -17,7 +17,8 @@ import notificationRoutes from "./routes/notification.route.js";
 import incidentRoutes from "./routes/incidents.route.js";
 import aiRoutes from "./routes/ai.route.js";
 import { createInternalCallEventsRouter } from "./routes/internal-call-events.route.js";
-import { io, getUserRoom } from "./lib/socket.js";
+import { createIncomingCallNotifications } from "./lib/notification.service.js";
+import { io, getUserRoom, invalidateCallMediaSession } from "./lib/socket.js";
 
 // Express configuration
 // -----------------------------------------------------------------------------
@@ -255,7 +256,12 @@ setupSwagger(app);
 
 app.use(
   "/internal",
-  createInternalCallEventsRouter({ io, getUserRoom }),
+  createInternalCallEventsRouter({
+    io,
+    getUserRoom,
+    invalidateCallMediaSession,
+    createIncomingCallNotifications,
+  }),
 );
 
 app.use("/api/auth", authRoutes);

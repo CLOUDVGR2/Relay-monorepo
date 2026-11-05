@@ -45,7 +45,7 @@ const defaultPreferences: Preferences = {
 const validClock = (value: string) =>
   /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 
-export function NotificationPreferencesScreen({}: Props) {
+export function NotificationPreferencesScreen(_props: Props) {
   const [people, setPeople] = useState<RelayUser[]>([]);
   const [preferences, setPreferences] = useState<Preferences>(defaultPreferences);
   const [loading, setLoading] = useState(true);

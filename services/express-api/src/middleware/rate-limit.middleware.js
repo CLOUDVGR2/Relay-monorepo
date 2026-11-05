@@ -46,6 +46,18 @@ function createRedisStore(prefix) {
 }
 
 /**
+ * Use the default in-memory store only when explicitly requested by tests.
+ * Production retains Redis-backed counters shared across API instances.
+ */
+function createRateLimitStore(prefix) {
+  if (process.env.RELAY_TEST_IN_MEMORY_RATE_LIMIT_STORE === "1") {
+    return undefined;
+  }
+
+  return createRedisStore(prefix);
+}
+
+/**
  * Limit repeated login attempts from one client IP.
  *
  * This reduces simple automated abuse but does not stop distributed attacks
@@ -53,7 +65,7 @@ function createRedisStore(prefix) {
  */
 export const authRateLimiter = rateLimit({
   ...commonOptions,
-  store: createRedisStore("relay:ratelimit:auth:"),
+  store: createRateLimitStore("relay:ratelimit:auth:"),
   windowMs: 15 * 60 * 1000,
   limit: 10,
 });
@@ -64,7 +76,7 @@ export const authRateLimiter = rateLimit({
  */
 export const signupRateLimiter = rateLimit({
   ...commonOptions,
-  store: createRedisStore("relay:ratelimit:signup:"),
+  store: createRateLimitStore("relay:ratelimit:signup:"),
   windowMs: 60 * 60 * 1000,
   limit: 5,
 });
@@ -77,7 +89,7 @@ export const signupRateLimiter = rateLimit({
  */
 export const sendMessageRateLimiter = rateLimit({
   ...commonOptions,
-  store: createRedisStore("relay:ratelimit:messages:"),
+  store: createRateLimitStore("relay:ratelimit:messages:"),
   windowMs: 60 * 1000,
   limit: 30,
 });
@@ -88,7 +100,7 @@ export const sendMessageRateLimiter = rateLimit({
  */
 export const incidentMutationRateLimiter = rateLimit({
   ...commonOptions,
-  store: createRedisStore("relay:ratelimit:incidents:"),
+  store: createRateLimitStore("relay:ratelimit:incidents:"),
   windowMs: 60 * 1000,
   limit: 20,
 });
@@ -99,14 +111,14 @@ export const incidentMutationRateLimiter = rateLimit({
  */
 export const profileUpdateRateLimiter = rateLimit({
   ...commonOptions,
-  store: createRedisStore("relay:ratelimit:profile:"),
+  store: createRateLimitStore("relay:ratelimit:profile:"),
   windowMs: 15 * 60 * 1000,
   limit: 10,
 });
 
 export const aiAnswerRateLimiter = rateLimit({
   ...commonOptions,
-  store: createRedisStore("relay:ratelimit:ai-answer:"),
+  store: createRateLimitStore("relay:ratelimit:ai-answer:"),
   windowMs: 60 * 1000,
   limit: 10,
 });
@@ -114,7 +126,7 @@ export const aiAnswerRateLimiter = rateLimit({
 
 export const aiDocumentIngestionRateLimiter = rateLimit({
   ...commonOptions,
-  store: createRedisStore("relay:ratelimit:ai-ingestion:"),
+  store: createRateLimitStore("relay:ratelimit:ai-ingestion:"),
   windowMs: 60 * 1000,
   limit: 3,
 });

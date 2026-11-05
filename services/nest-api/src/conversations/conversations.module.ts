@@ -11,9 +11,11 @@ import { TasksResolver } from './tasks.resolver.js';
 import { CallsService } from './calls.service.js';
 import { CallsResolver } from './calls.resolver.js';
 import { CallEventsPublisher } from './call-events.publisher.js';
+import { InternalMediaSessionsController } from './internal-media-sessions.controller.js';
 
 @Module({
   imports: [PrismaModule, AuthModule, AIModule],
+  controllers: [InternalMediaSessionsController],
   providers: [
     ConversationsService,
     ConversationsResolver,

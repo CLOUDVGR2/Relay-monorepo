@@ -289,11 +289,74 @@ export function validateEnvironment(
     }
   }
 
+  // Validate private call-recording object storage configuration.
+  const storageKeys = [
+    'CALL_RECORDING_STORAGE_BUCKET',
+    'CALL_RECORDING_STORAGE_REGION',
+    'CALL_RECORDING_STORAGE_ACCESS_KEY_ID',
+    'CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY',
+  ] as const;
+  const configuredStorageKeys = storageKeys.filter(
+    (key) => config[key] !== undefined && config[key] !== null && config[key] !== '',
+  );
+
+  if (nodeEnv === 'production' && configuredStorageKeys.length !== storageKeys.length) {
+    throw new Error(
+      'Call-recording storage bucket, region, access key, and secret key must be configured in production.',
+    );
+  }
+
+  if (configuredStorageKeys.length > 0 && configuredStorageKeys.length !== storageKeys.length) {
+    throw new Error(
+      'Call-recording storage bucket, region, access key, and secret key must be configured together.',
+    );
+  }
+
+  for (const key of configuredStorageKeys) {
+    requireNonEmptyString(config[key], key);
+  }
+
+  const storageEndpoint = config['CALL_RECORDING_STORAGE_ENDPOINT'];
+  if (storageEndpoint !== undefined && storageEndpoint !== null && storageEndpoint !== '') {
+    if (typeof storageEndpoint !== 'string' || !storageEndpoint.trim()) {
+      throw new Error('CALL_RECORDING_STORAGE_ENDPOINT must be a valid HTTP(S) origin.');
+    }
+
+    try {
+      const parsedStorageEndpoint = new URL(storageEndpoint);
+      if (
+        !['http:', 'https:'].includes(parsedStorageEndpoint.protocol) ||
+        !parsedStorageEndpoint.hostname ||
+        parsedStorageEndpoint.username ||
+        parsedStorageEndpoint.password ||
+        parsedStorageEndpoint.search ||
+        parsedStorageEndpoint.hash ||
+        parsedStorageEndpoint.pathname !== '/'
+      ) {
+        throw new Error();
+      }
+    } catch {
+      throw new Error(
+        'CALL_RECORDING_STORAGE_ENDPOINT must be a valid HTTP(S) origin without credentials, path, query, or fragment.',
+      );
+    }
+  }
+
+  const rawForcePathStyle = config['CALL_RECORDING_STORAGE_FORCE_PATH_STYLE'];
+  let forcePathStyle = false;
+  if (rawForcePathStyle !== undefined && rawForcePathStyle !== null && rawForcePathStyle !== '') {
+    if (rawForcePathStyle !== 'true' && rawForcePathStyle !== 'false') {
+      throw new Error('CALL_RECORDING_STORAGE_FORCE_PATH_STYLE must be true or false.');
+    }
+    forcePathStyle = rawForcePathStyle === 'true';
+  }
+
   return {
     ...config,
     PORT: port,
     NODE_ENV: nodeEnv,
     REDIS_URL: redisUrl,
+    CALL_RECORDING_STORAGE_FORCE_PATH_STYLE: forcePathStyle,
   };
 }
 

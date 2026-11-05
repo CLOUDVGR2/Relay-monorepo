@@ -1,20 +1,22 @@
 /** Native entry point: restore a secure session, then mount authenticated navigation. */
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, StatusBar, StyleSheet, Text, View } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { NavigationContainer, DarkTheme, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthScreen } from './src/screens/AuthScreen';
 import { ConversationsScreen } from './src/screens/ConversationsScreen';
+import { CallsScreen } from './src/screens/CallsScreen';
 import { TasksScreen } from './src/screens/TasksScreen';
+import { MultiAgentTasksScreen } from './src/screens/MultiAgentTasksScreen';
 import { ConversationScreen } from './src/screens/ConversationScreen';
 import { AIAssistantScreen } from './src/screens/AIAssistantScreen';
 import { ActivityInboxScreen } from './src/screens/ActivityInboxScreen';
 import { NotificationPreferencesScreen } from './src/screens/NotificationPreferencesScreen';
+import { IncomingCallOverlay } from './src/components/IncomingCallOverlay';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
-import { Platform } from 'react-native';
 import { api, getErrorMessage, setAccessToken, setUnauthorizedHandler } from './src/lib/api';
 import { connectRealtime, disconnectRealtime } from './src/lib/realtime';
 import { colors } from './src/theme/colors';
@@ -25,6 +27,15 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const navigationRef = createNavigationContainerRef<RootStackParamList>();
 const EAS_PROJECT_ID = '8bb6adca-f08c-4d23-8fa7-b605fba56146';
 const TOKEN_KEY = 'relay.access-token';
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 const navigationTheme = {
   ...DarkTheme,
@@ -79,8 +90,15 @@ export default function App() {
       handledResponseId = responseId;
 
       const data = response.notification.request.content.data as {
+        type?: unknown;
         conversationUserId?: unknown;
       };
+
+      if (data?.type === 'incoming_call') {
+        if (navigationRef.isReady()) navigationRef.navigate('Calls');
+        return;
+      }
+
       const peerId = String(data?.conversationUserId ?? '');
 
       if (!peerId || !/^[a-fA-F0-9]{24}$/.test(peerId)) return;
@@ -117,6 +135,13 @@ export default function App() {
             name: 'Messages',
             importance: Notifications.AndroidImportance.HIGH,
             vibrationPattern: [0, 250, 250, 250],
+          });
+
+          await Notifications.setNotificationChannelAsync('incoming-calls', {
+            name: 'Incoming calls',
+            importance: Notifications.AndroidImportance.MAX,
+            vibrationPattern: [0, 900, 500, 900, 700],
+            lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
           });
         }
 
@@ -165,7 +190,7 @@ export default function App() {
       active = false;
       responseSubscription.remove();
     };
-  }, [user?._id, token]);
+  }, [user, token]);
 
   // Reconnect realtime when the authenticated identity or token changes.
   const userId = user?._id;
@@ -207,8 +232,18 @@ export default function App() {
   }, [clearSession]);
 
   return <SafeAreaProvider><StatusBar barStyle="light-content" backgroundColor={colors.background} /><NavigationContainer ref={navigationRef} theme={navigationTheme}>
-    {booting ? <View style={styles.loading}><ActivityIndicator color={colors.primary} size="large" /><Text style={styles.loadingText}>Securing your Relay session…</Text></View> : user && token ? <Stack.Navigator screenOptions={{ headerStyle: { backgroundColor: colors.surface }, headerTintColor: colors.text, headerTitleStyle: { fontWeight: '800' }, contentStyle: { backgroundColor: colors.background }, headerShadowVisible: false }}><Stack.Screen name="Conversations" options={{ title: 'Relay' }}>{(props) => <ConversationsScreen {...props} user={user} onLogout={logout} />}</Stack.Screen>
- <Stack.Screen name="Tasks" component={TasksScreen} options={{ title: "Tasks", headerBackTitle: "Messages" }} /><Stack.Screen name="Conversation" component={ConversationScreen} options={({ route }) => ({ title: route.params.person.fullName, headerBackTitle: 'Messages' })} /><Stack.Screen name="AI" component={AIAssistantScreen} options={{ title: 'Relay Intelligence', headerBackTitle: 'Messages' }} /><Stack.Screen name="ActivityInbox" component={ActivityInboxScreen} options={{ title: 'Activity', headerBackTitle: 'Messages' }} /><Stack.Screen name="NotificationPreferences" component={NotificationPreferencesScreen} options={{ title: 'Notification settings', headerBackTitle: 'Messages' }} /></Stack.Navigator> : <AuthScreen onAuthenticated={onAuthenticated} />}
+    {booting ? <View style={styles.loading}><ActivityIndicator color={colors.primary} size="large" /><Text style={styles.loadingText}>Securing your Relay session…</Text></View> : user && token ? <Stack.Navigator screenOptions={{ headerStyle: { backgroundColor: colors.surface }, headerTintColor: colors.text, headerTitleStyle: { fontWeight: '800' }, contentStyle: { backgroundColor: colors.background }, headerShadowVisible: false }}><Stack.Screen name="Conversations" options={{ title: 'Relay' }}>{(props) => <ConversationsScreen {...props} user={user} onLogout={logout} />}</Stack.Screen><Stack.Screen name="Calls" options={{ title: "Calls", headerBackTitle: "Messages" }}>{(props) => <CallsScreen {...props} user={user} />}</Stack.Screen>
+ <Stack.Screen name="Tasks" component={TasksScreen} options={{ title: "Tasks", headerBackTitle: "Messages" }} /><Stack.Screen name="MultiAgentTasks" component={MultiAgentTasksScreen} options={{ title: "Multi-Agent Tasks", headerBackTitle: "Messages" }} /><Stack.Screen name="Conversation" options={({ route }) => ({ title: route.params.person.fullName, headerBackTitle: 'Messages' })}>{(props) => <ConversationScreen {...props} userId={user._id} />}</Stack.Screen><Stack.Screen name="AI" component={AIAssistantScreen} options={{ title: 'Relay Intelligence', headerBackTitle: 'Messages' }} /><Stack.Screen name="ActivityInbox" component={ActivityInboxScreen} options={{ title: 'Activity', headerBackTitle: 'Messages' }} /><Stack.Screen name="NotificationPreferences" component={NotificationPreferencesScreen} options={{ title: 'Notification settings', headerBackTitle: 'Messages' }} /></Stack.Navigator> : <AuthScreen onAuthenticated={onAuthenticated} />}
+    {user && token ? (
+      <IncomingCallOverlay
+        user={user}
+        onAccepted={(callId) => {
+          if (navigationRef.isReady()) {
+            navigationRef.navigate('Calls', { callId });
+          }
+        }}
+      />
+    ) : null}
     {startupError && !booting && !user ? <View accessibilityLiveRegion="polite" style={styles.startupNotice}><Text style={styles.startupNoticeText}>{startupError}</Text></View> : null}
   </NavigationContainer></SafeAreaProvider>;
 }

@@ -17,13 +17,12 @@ export class ConversationsService {
     private readonly authUsers: AuthUserService,
   ) {}
 
-  // Return only conversations the requesting account belongs to.
-  // Filtering in the database avoids exposing other users' conversations.
+  // Return visible conversations for the requesting account only.
   findAll(userId: string) {
     return this.prisma.conversation.findMany({
       where: {
         participants: {
-          some: { userId: userId.toLowerCase() },
+          some: { userId: userId.toLowerCase(), hiddenAt: null },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -33,6 +32,39 @@ export class ConversationsService {
         },
       },
     });
+  }
+
+  // Hide a conversation only for the authenticated participant.
+  // Shared messages and other participants' visibility are preserved.
+  async hideConversation(conversationId: string, userId: string) {
+    const normalizedUserId = userId.toLowerCase();
+    const membership = await this.prisma.conversationParticipant.findFirst({
+      where: {
+        conversationId,
+        userId: normalizedUserId,
+        hiddenAt: null,
+      },
+      select: { id: true },
+    });
+
+    if (!membership) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    const result = await this.prisma.conversationParticipant.updateMany({
+      where: {
+        conversationId,
+        userId: normalizedUserId,
+        hiddenAt: null,
+      },
+      data: { hiddenAt: new Date() },
+    });
+
+    if (result.count === 0) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    return true;
   }
 
   // Create a conversation and its participant records atomically.
@@ -72,25 +104,100 @@ export class ConversationsService {
       );
     }
 
-    // A nested write ensures the conversation and all participants are created
-    // together. If any insert fails, Prisma rolls back the whole transaction.
-    return this.prisma.conversation.create({
-      data: {
-        name,
-        description,
-        participants: {
-          create: uniqueParticipantIds.map((participantId) => ({
-            userId: participantId,
-            role: participantId === creatorId ? 'ADMIN' : 'MEMBER',
-          })),
-        },
+    const conversationInclude = {
+      participants: {
+        orderBy: { joinedAt: 'asc' as const },
       },
-      include: {
-        participants: {
-          orderBy: { joinedAt: 'asc' },
+    };
+
+    const createConversation = (client: typeof this.prisma) =>
+      client.conversation.create({
+        data: {
+          name,
+          description,
+          participants: {
+            create: uniqueParticipantIds.map((participantId) => ({
+              userId: participantId,
+              role: participantId === creatorId ? 'ADMIN' : 'MEMBER',
+            })),
+          },
         },
-      },
-    });
+        include: conversationInclude,
+      });
+
+    // Reuse existing unnamed direct conversations. The transaction-scoped
+    // advisory lock serializes concurrent requests for the same normalized
+    // pair, while requests for other pairs remain independent.
+    if (
+      uniqueParticipantIds.length === 2 &&
+      name == null &&
+      description == null
+    ) {
+      const [firstParticipantId, secondParticipantId] = [
+        ...uniqueParticipantIds,
+      ].sort();
+
+      const lockKey = JSON.stringify([
+        firstParticipantId,
+        secondParticipantId,
+      ]);
+
+      return this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`
+          SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))::text
+        `;
+
+        const existingConversation = await tx.conversation.findFirst({
+          where: {
+            AND: [
+              {
+                participants: {
+                  some: { userId: firstParticipantId },
+                },
+              },
+              {
+                participants: {
+                  some: { userId: secondParticipantId },
+                },
+              },
+              {
+                participants: {
+                  every: {
+                    userId: { in: uniqueParticipantIds },
+                  },
+                },
+              },
+            ],
+          },
+          orderBy: { createdAt: 'desc' },
+          include: conversationInclude,
+        });
+
+        if (existingConversation) {
+          await tx.conversationParticipant.updateMany({
+            where: {
+              conversationId: existingConversation.id,
+              userId: creatorId,
+            },
+            data: { hiddenAt: null },
+          });
+
+          return { ...existingConversation, created: false };
+        }
+
+        return {
+          ...(await createConversation(tx as typeof this.prisma)),
+          created: true,
+        };
+      });
+    }
+
+    // Named conversations and groups are newly created here.
+    return createConversation(this.prisma).then((conversation) => ({
+      ...conversation,
+      created: true,
+    }));
+
   }
 
   // Update only supplied metadata fields, and only when the actor is an admin.

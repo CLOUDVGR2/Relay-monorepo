@@ -7,3 +7,4 @@ Use [`0000-template.md`](0000-template.md) for new records. Number records seque
 ## Current decision records
 
 - [ADR 0001: Canonical monorepo boundaries](0001-canonical-monorepo-boundaries.md)
+- [ADR 0002: Call recording, transcription, and summaries](0002-call-recording-transcription-and-summaries.md)

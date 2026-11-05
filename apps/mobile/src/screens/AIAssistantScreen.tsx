@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as Speech from 'expo-speech';
+import { ActivityIndicator, Alert, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { API_ORIGIN, api, getErrorMessage } from '../lib/api';
 import { Screen } from '../components/Screen';
 import { colors } from '../theme/colors';
@@ -38,8 +39,61 @@ export function AIAssistantScreen() {
   const [selectedConversationId, setSelectedConversationId] = useState('');
   const [conversationLoading, setConversationLoading] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [deletingConversation, setDeletingConversation] = useState(false);
   const [summaryError, setSummaryError] = useState('');
   const [analysis, setAnalysis] = useState<ConversationAnalysis | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speechRate, setSpeechRate] = useState(1);
+  const speechRequestId = useRef(0);
+
+  const stopSummarySpeech = () => {
+    speechRequestId.current += 1;
+    setIsSpeaking(false);
+    void Speech.stop().catch(() => undefined);
+  };
+
+  const playSummary = async () => {
+    const speechText = analysis?.summary?.trim();
+    if (!speechText) return;
+
+    const requestId = ++speechRequestId.current;
+    setIsSpeaking(false);
+    setSummaryError('');
+
+    try {
+      await Speech.stop();
+      if (speechRequestId.current !== requestId) return;
+
+      setIsSpeaking(true);
+      Speech.speak(speechText, {
+        rate: speechRate,
+        onDone: () => {
+          if (speechRequestId.current === requestId) setIsSpeaking(false);
+        },
+        onStopped: () => {
+          if (speechRequestId.current === requestId) setIsSpeaking(false);
+        },
+        onError: () => {
+          if (speechRequestId.current === requestId) {
+            setIsSpeaking(false);
+            setSummaryError('Could not play the summary aloud.');
+          }
+        },
+      });
+    } catch {
+      if (speechRequestId.current === requestId) {
+        setIsSpeaking(false);
+        setSummaryError('Could not start summary playback.');
+      }
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      speechRequestId.current += 1;
+      void Speech.stop().catch(() => undefined);
+    };
+  }, []);
 
   const graphql = async <T,>(query: string, variables?: Record<string, unknown>) => {
     const response = await api.post<GraphQLResponse<T>>(
@@ -78,8 +132,67 @@ export function AIAssistantScreen() {
     };
   }, []);
 
+  const removeSelectedConversation = () => {
+    if (!selectedConversationId || deletingConversation || summaryLoading) return;
+
+    const conversationId = selectedConversationId;
+    const conversation = conversations.find((item) => item.id === conversationId);
+    const conversationName =
+      conversation?.name?.trim() ||
+      conversation?.description?.trim() ||
+      'this conversation';
+
+    Alert.alert(
+      'Remove conversation?',
+      `Hide "${conversationName}" from your conversation list? Your messages and other participants' history will be preserved.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setDeletingConversation(true);
+              setSummaryError('');
+
+              try {
+                const result = await graphql<{ hideConversation: boolean }>(
+                  `mutation HideConversation($input: HideConversationInput!) {
+                    hideConversation(input: $input)
+                  }`,
+                  { input: { conversationId } },
+                );
+
+                if (!result.hideConversation) {
+                  throw new Error('The conversation could not be removed.');
+                }
+
+                const remaining = conversations.filter(
+                  (item) => item.id !== conversationId,
+                );
+
+                stopSummarySpeech();
+                setConversations(remaining);
+                setSelectedConversationId(remaining[0]?.id ?? '');
+                setAnalysis(null);
+                setSummaryError('');
+              } catch (requestError) {
+                setSummaryError(
+                  getErrorMessage(requestError, 'Could not remove this conversation.'),
+                );
+              } finally {
+                setDeletingConversation(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  };
+
   const summarizeConversation = async () => {
-    if (!selectedConversationId || summaryLoading) return;
+    if (!selectedConversationId || summaryLoading || deletingConversation) return;
+    stopSummarySpeech();
     setSummaryLoading(true);
     setSummaryError('');
     setAnalysis(null);
@@ -96,7 +209,11 @@ export function AIAssistantScreen() {
       );
       setAnalysis(result.summarizeConversation);
     } catch (requestError) {
-      setSummaryError(getErrorMessage(requestError, 'Could not summarize this conversation.'));
+      setSummaryError(
+      requestError instanceof Error
+        ? requestError.message
+        : getErrorMessage(requestError, 'Could not summarize this conversation.'),
+    );
     } finally {
       setSummaryLoading(false);
     }
@@ -133,6 +250,7 @@ export function AIAssistantScreen() {
                 accessibilityRole="button"
                 accessibilityState={{ selected: selectedConversationId === conversation.id }}
                 onPress={() => {
+                  stopSummarySpeech();
                   setSelectedConversationId(conversation.id);
                   setAnalysis(null);
                   setSummaryError('');
@@ -145,11 +263,25 @@ export function AIAssistantScreen() {
           </View>
           <Pressable
             accessibilityRole="button"
-            disabled={!selectedConversationId || summaryLoading}
+            disabled={!selectedConversationId || summaryLoading || deletingConversation}
             onPress={() => void summarizeConversation()}
-            style={({ pressed }) => [styles.summaryButton, (!selectedConversationId || summaryLoading || pressed) && styles.disabled]}
+            style={({ pressed }) => [styles.summaryButton, (!selectedConversationId || summaryLoading || deletingConversation || pressed) && styles.disabled]}
           >
             {summaryLoading ? <ActivityIndicator color={colors.background} /> : <Text style={styles.summaryButtonText}>Summarize selected conversation</Text>}
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Remove selected conversation from your list"
+            disabled={!selectedConversationId || summaryLoading || deletingConversation}
+            onPress={removeSelectedConversation}
+            style={({ pressed }) => [
+              styles.removeConversationButton,
+              (!selectedConversationId || summaryLoading || deletingConversation || pressed) && styles.disabled,
+            ]}
+          >
+            {deletingConversation
+              ? <ActivityIndicator color={colors.danger} />
+              : <Text style={styles.removeConversationButtonText}>Remove selected conversation</Text>}
           </Pressable>
         </>
       )}
@@ -158,6 +290,51 @@ export function AIAssistantScreen() {
         <View style={styles.analysisCard}>
           <Text style={styles.answerLabel}>SUMMARY</Text>
           <Text selectable style={styles.answerText}>{analysis.summary}</Text>
+          <View style={styles.speechControls}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Play summary aloud"
+              disabled={!analysis.summary.trim()}
+              onPress={() => void playSummary()}
+              style={({ pressed }) => [
+                styles.speechButton,
+                (pressed || !analysis.summary.trim()) && styles.disabled,
+              ]}
+            >
+              <Text style={styles.speechButtonText}>
+                {isSpeaking ? '▶ Replay' : '▶ Play summary'}
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Stop summary playback"
+              disabled={!isSpeaking}
+              onPress={stopSummarySpeech}
+              style={({ pressed }) => [
+                styles.speechButton,
+                (pressed || !isSpeaking) && styles.disabled,
+              ]}
+            >
+              <Text style={styles.speechButtonText}>■ Stop</Text>
+            </Pressable>
+          </View>
+          <View style={styles.speechSpeedRow}>
+            <Text style={styles.citationMeta}>Reading speed</Text>
+            {[0.85, 1, 1.15].map((rate) => (
+              <Pressable
+                key={rate}
+                accessibilityRole="button"
+                accessibilityState={{ selected: speechRate === rate }}
+                onPress={() => setSpeechRate(rate)}
+                style={[
+                  styles.speechSpeedButton,
+                  speechRate === rate && styles.speechSpeedSelected,
+                ]}
+              >
+                <Text style={styles.speechSpeedText}>{rate}×</Text>
+              </Pressable>
+            ))}
+          </View>
           <Text style={styles.analysisHeading}>Decisions</Text>
           {analysis.decisions.length ? analysis.decisions.map((decision, index) => <Text key={`decision-${index}`} style={styles.analysisItem}>• {decision}</Text>) : <Text style={styles.muted}>No explicit decisions identified.</Text>}
           <Text style={styles.analysisHeading}>Action items</Text>
@@ -219,7 +396,16 @@ const styles = StyleSheet.create({
   conversationChoiceText: { color: colors.text, fontSize: 12, lineHeight: 17 },
   summaryButton: { minHeight: 42, padding: 11, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   summaryButtonText: { color: colors.background, fontSize: 12, fontWeight: '800' },
+  removeConversationButton: { minHeight: 40, padding: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.danger, alignItems: 'center', justifyContent: 'center' },
+  removeConversationButtonText: { color: colors.danger, fontSize: 12, fontWeight: '800' },
   analysisCard: { gap: 10, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border },
+  speechControls: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  speechButton: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 9, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceRaised },
+  speechButtonText: { color: colors.text, fontSize: 11, fontWeight: '800' },
+  speechSpeedRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 4 },
+  speechSpeedButton: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
+  speechSpeedSelected: { borderColor: colors.primary, backgroundColor: colors.surfaceRaised },
+  speechSpeedText: { color: colors.text, fontSize: 11, fontWeight: '700' },
   analysisHeading: { color: colors.text, fontSize: 12, fontWeight: '800', marginTop: 4 },
   analysisItem: { color: colors.text, fontSize: 12, lineHeight: 19 },
   actionItem: { gap: 4, padding: 9, borderRadius: 9, backgroundColor: colors.surfaceRaised },

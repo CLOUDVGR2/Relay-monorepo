@@ -84,6 +84,39 @@ services:
       - no-new-privileges:true
     mem_limit: 768m
 
+  rustfs-permissions:
+    image: busybox:1.37.0
+    user: "0:0"
+    command: ["sh", "-c", "chown -R 10001:10001 /data"]
+    restart: "no"
+    volumes:
+      - call_recording_storage_data:/data
+    mem_limit: 64m
+    pids_limit: 20
+
+  rustfs:
+    image: rustfs/rustfs:1.0.4
+    restart: unless-stopped
+    init: true
+    command: ["/data"]
+    environment:
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ACCESS_KEY: ${CALL_RECORDING_STORAGE_ACCESS_KEY_ID:?Set CALL_RECORDING_STORAGE_ACCESS_KEY_ID in root .env}
+      RUSTFS_SECRET_KEY: ${CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY:?Set CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY in root .env}
+      RUSTFS_CONSOLE_ENABLE: "false"
+    volumes:
+      - call_recording_storage_data:/data
+    networks:
+      - relay-network
+    depends_on:
+      rustfs-permissions:
+        condition: service_completed_successfully
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 150
+
   ai-service:
     image: relay-monorepo-ai-service:local
     build:
@@ -95,6 +128,7 @@ services:
       CLIENT_URL: http://localhost:5173,http://127.0.0.1:5173,http://localhost:8088,http://127.0.0.1:8088
       DATABASE_URL: "postgresql+asyncpg://atlas_ai:${ATLAS_POSTGRES_PASSWORD:?Set ATLAS_POSTGRES_PASSWORD in root .env}@postgres:5432/atlas_ai"
       PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?Set PYTHON_AI_INTERNAL_TOKEN in root .env}
+      REDIS_URL: redis://redis:6379
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       AI_PROVIDER: ${AI_PROVIDER:-litellm}
       LITELLM_MODEL: ${LITELLM_MODEL:-ollama_chat/qwen2.5:3b-instruct}
@@ -105,6 +139,8 @@ services:
       - relay-network
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test:
@@ -120,6 +156,37 @@ services:
       - no-new-privileges:true
     mem_limit: 512m
     pids_limit: 150
+
+
+  multi-agent-worker:
+    image: relay-monorepo-ai-service:local
+    build:
+      context: ./services/ai-service
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.multi_agent.worker"]
+    restart: unless-stopped
+    init: true
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://atlas_ai:${ATLAS_POSTGRES_PASSWORD:?Set ATLAS_POSTGRES_PASSWORD in root .env}@postgres:5432/atlas_ai"
+      REDIS_URL: redis://redis:6379
+      MULTI_AGENT_PROVIDER: ${MULTI_AGENT_PROVIDER:-mock}
+      MULTI_AGENT_MODEL: ${MULTI_AGENT_MODEL:-ollama_chat/qwen2.5:3b-instruct}
+      MULTI_AGENT_TIMEOUT_SECONDS: ${MULTI_AGENT_TIMEOUT_SECONDS:-20}
+      AI_PROVIDER_API_KEY: ${AI_PROVIDER_API_KEY:-}
+      LITELLM_API_BASE: ${LITELLM_API_BASE:-http://host.docker.internal:11434}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    networks:
+      - relay-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 100
+    stop_grace_period: 35s
 
   express-api:
     image: relay-monorepo-express-api:local
@@ -141,6 +208,7 @@ services:
       PYTHON_AI_BASE_URL: http://ai-service:8000
       PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?Set PYTHON_AI_INTERNAL_TOKEN in root .env}
       CALL_EVENTS_INTERNAL_TOKEN: ${CALL_EVENTS_INTERNAL_TOKEN:?Set CALL_EVENTS_INTERNAL_TOKEN in root .env}
+      NEST_API_BASE_URL: http://nest-api:3000
     ports:
       - "127.0.0.1:5001:5001"
     networks:
@@ -178,6 +246,12 @@ services:
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Set INTERNAL_API_TOKEN in root .env}
       CALL_EVENTS_BASE_URL: http://express-api:5001
       CALL_EVENTS_INTERNAL_TOKEN: ${CALL_EVENTS_INTERNAL_TOKEN:?Set CALL_EVENTS_INTERNAL_TOKEN in root .env}
+      CALL_RECORDING_STORAGE_ENDPOINT: http://rustfs:9000
+      CALL_RECORDING_STORAGE_BUCKET: ${CALL_RECORDING_STORAGE_BUCKET:?Set CALL_RECORDING_STORAGE_BUCKET in root .env}
+      CALL_RECORDING_STORAGE_REGION: ${CALL_RECORDING_STORAGE_REGION:?Set CALL_RECORDING_STORAGE_REGION in root .env}
+      CALL_RECORDING_STORAGE_ACCESS_KEY_ID: ${CALL_RECORDING_STORAGE_ACCESS_KEY_ID:?Set CALL_RECORDING_STORAGE_ACCESS_KEY_ID in root .env}
+      CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY: ${CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY:?Set CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY in root .env}
+      CALL_RECORDING_STORAGE_FORCE_PATH_STYLE: ${CALL_RECORDING_STORAGE_FORCE_PATH_STYLE:-true}
     ports:
       - "127.0.0.1:3000:3000"
     networks:
@@ -189,6 +263,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      rustfs:
+        condition: service_started
     security_opt:
       - no-new-privileges:true
     mem_limit: 512m
@@ -268,7 +344,7 @@ services:
       GATEWAY_GO_URL: http://jobs-api:8081
       GATEWAY_PYTHON_URL: http://ai-service:8000
     ports:
-      - "127.0.0.1:8090:8090"
+      - "8090:8090"
     networks:
       - relay-network
     depends_on:
@@ -320,6 +396,8 @@ networks:
     driver: bridge
 
 volumes:
+  call_recording_storage_data:
+    name: relay-monorepo_call_recording_storage_data
   mongodb_data:
     name: relay-monorepo_mongodb_data
   atlas_postgres_data:

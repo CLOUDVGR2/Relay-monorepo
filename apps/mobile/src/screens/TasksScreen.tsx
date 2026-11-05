@@ -244,14 +244,6 @@ export function TasksScreen({ navigation }: Props) {
 
   return (
     <Screen scroll>
-      <Pressable
-        accessibilityRole="button"
-        onPress={() => navigation.goBack()}
-        style={styles.back}
-      >
-        <Text style={styles.backText}>‹ Back</Text>
-      </Pressable>
-
       <Heading
         title="Tasks"
         subtitle="Create and track work shared with your conversation."
@@ -391,8 +383,6 @@ export function TasksScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  back: { alignSelf: 'flex-start', paddingVertical: 4, marginBottom: 12 },
-  backText: { color: colors.primary, fontSize: 15, fontWeight: '700' },
   label: {
     color: colors.muted,
     fontSize: 11,

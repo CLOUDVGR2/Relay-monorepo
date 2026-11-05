@@ -10,7 +10,7 @@ const notificationSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ["message", "mention"],
+      enum: ["message", "mention", "incoming_call"],
       default: "message",
       required: true,
     },
@@ -34,6 +34,11 @@ const notificationSchema = new mongoose.Schema(
       ref: "Message",
       default: null,
     },
+    callId: {
+      type: String,
+      maxlength: 36,
+      default: null,
+    },
     readAt: {
       type: Date,
       default: null,
@@ -43,6 +48,16 @@ const notificationSchema = new mongoose.Schema(
 );
 
 notificationSchema.index({ userId: 1, createdAt: -1, _id: -1 });
+notificationSchema.index(
+  { userId: 1, callId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      type: "incoming_call",
+      callId: { $type: "string" },
+    },
+  },
+);
 
 const Notification = mongoose.model("Notification", notificationSchema);
 

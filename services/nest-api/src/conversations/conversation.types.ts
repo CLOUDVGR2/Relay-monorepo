@@ -79,6 +79,10 @@ export class ConversationType {
   @Field(() => ID)
   id!: string;
 
+  // Indicates whether this mutation created a new conversation.
+  @Field(() => Boolean, { nullable: true })
+  created?: boolean;
+
   // Record when the conversation was created.
   @Field(() => GraphQLISODateTime)
   createdAt!: Date;
@@ -131,6 +135,14 @@ export class CreateConversationInput {
   @IsString()
   @MaxLength(1000)
   description?: string | null;
+}
+
+// Identify a conversation to hide from the authenticated user's list.
+@InputType()
+export class HideConversationInput {
+  @Field(() => ID)
+  @IsUUID()
+  conversationId!: string;
 }
 
 // Define metadata an admin can update on an existing conversation.

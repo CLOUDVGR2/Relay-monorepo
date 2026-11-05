@@ -2,6 +2,15 @@
 
 import { validateEnvironment } from './env.validation.js';
 
+const validStorageConfig = {
+  CALL_RECORDING_STORAGE_BUCKET: 'relay-call-recordings',
+  CALL_RECORDING_STORAGE_REGION: 'us-east-1',
+  CALL_RECORDING_STORAGE_ACCESS_KEY_ID: 'test-access-key',
+  CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY: 'test-secret-key',
+  CALL_RECORDING_STORAGE_ENDPOINT: 'http://minio:9000',
+  CALL_RECORDING_STORAGE_FORCE_PATH_STYLE: 'true',
+};
+
 const validConfig = {
   DATABASE_URL:
     'postgresql://user:password@localhost:5432/chatapp',
@@ -21,6 +30,7 @@ describe('validateEnvironment', () => {
   it('should accept a valid port and environment', () => {
     const result = validateEnvironment({
       ...validConfig,
+      ...validStorageConfig,
       PORT: '8080',
       NODE_ENV: 'production',
       CLIENT_URL: 'https://example.com',
@@ -218,6 +228,55 @@ describe('validateEnvironment', () => {
     const result = validateEnvironment(validConfig);
 
     expect(result['JWT_SECRET']).toBe(validConfig.JWT_SECRET);
+  });
+
+  it('requires call-recording storage configuration in production', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validConfig,
+        NODE_ENV: 'production',
+        CLIENT_URL: 'https://example.com',
+        REDIS_URL: 'redis://redis.example.com:6379',
+      }),
+    ).toThrow('Call-recording storage bucket, region, access key, and secret key must be configured in production.');
+  });
+
+  it('accepts complete private call-recording storage settings', () => {
+    const result = validateEnvironment({
+      ...validConfig,
+      ...validStorageConfig,
+    });
+
+    expect(result['CALL_RECORDING_STORAGE_FORCE_PATH_STYLE']).toBe(true);
+  });
+
+  it('rejects incomplete call-recording storage credentials', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validConfig,
+        CALL_RECORDING_STORAGE_BUCKET: 'relay-call-recordings',
+      }),
+    ).toThrow('Call-recording storage bucket, region, access key, and secret key must be configured together.');
+  });
+
+  it('rejects a storage endpoint containing a path', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validConfig,
+        ...validStorageConfig,
+        CALL_RECORDING_STORAGE_ENDPOINT: 'http://minio:9000/private',
+      }),
+    ).toThrow('CALL_RECORDING_STORAGE_ENDPOINT must be a valid HTTP(S) origin without credentials, path, query, or fragment.');
+  });
+
+  it('rejects an invalid path-style setting', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validConfig,
+        ...validStorageConfig,
+        CALL_RECORDING_STORAGE_FORCE_PATH_STYLE: 'yes',
+      }),
+    ).toThrow('CALL_RECORDING_STORAGE_FORCE_PATH_STYLE must be true or false.');
   });
 
   it('allows call-event integration settings to be omitted', () => {

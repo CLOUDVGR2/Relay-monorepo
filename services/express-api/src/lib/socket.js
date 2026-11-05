@@ -8,6 +8,7 @@ import { parseCookie } from "cookie";
 import mongoose from "mongoose";
 
 import User from "../models/user.model.js";
+import { createCallSignalingRelay } from "./call-signaling.js";
 
 // -----------------------------------------------------------------------------
 // HTTP and Socket.IO server
@@ -88,6 +89,12 @@ export function getReceiverSocketIds(userId) {
 // Return the IDs of users who currently have at least one active connection.
 function getOnlineUserIds() {
   return [...userSocketMap.keys()];
+}
+
+const callSignalingRelay = createCallSignalingRelay({ io });
+
+export function invalidateCallMediaSession(callId) {
+  callSignalingRelay.invalidateCall(callId);
 }
 
 // -----------------------------------------------------------------------------
@@ -211,6 +218,9 @@ io.on("connection", (socket) => {
 
   // Join the user's private room for delivery to all their devices.
   socket.join(getUserRoom(userId));
+
+  // Signaling identity comes only from the authenticated socket.
+  callSignalingRelay.attach(socket);
 
   // Relay typing state to the recipient's private room.
   socket.on("typing", (payload) => {

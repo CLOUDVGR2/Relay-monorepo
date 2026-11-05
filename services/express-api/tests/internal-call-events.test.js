@@ -23,10 +23,14 @@ let server;
 let baseUrl;
 let emitted;
 let roomCalls;
+let invalidatedCalls;
+let incomingCallPushes;
 
 before(async () => {
   emitted = [];
   roomCalls = [];
+  invalidatedCalls = [];
+  incomingCallPushes = [];
 
   const io = {
     to(room) {
@@ -53,6 +57,12 @@ before(async () => {
       io,
       getUserRoom: (userId) => `user:${userId}`,
       getToken: () => TOKEN,
+      invalidateCallMediaSession: (callId) => {
+        invalidatedCalls.push(callId);
+      },
+      createIncomingCallNotifications: async (payload) => {
+        incomingCallPushes.push(payload);
+      },
     }),
   );
 
@@ -105,7 +115,61 @@ describe("internal call-event delivery", () => {
     assert.equal(emitted.length, 0);
   });
 
+  it("invalidates media sessions only for terminal call statuses", async () => {
+    for (const status of ["RINGING", "ACTIVE", "ENDED", "CANCELLED"]) {
+      const response = await postEvent({ ...event, status });
+      assert.equal(response.status, 202);
+    }
+
+    assert.deepEqual(invalidatedCalls, [event.callId, event.callId]);
+
+    // Keep this test isolated from the following delivery assertions.
+    emitted.length = 0;
+    roomCalls.length = 0;
+    incomingCallPushes.length = 0;
+  });
+
+  it("sends an incoming-call push only for audio invitations to invitees", async () => {
+    const response = await postEvent({ ...event, type: "AUDIO" });
+
+    assert.equal(response.status, 202);
+
+    // Push dispatch is intentionally asynchronous and must not delay the
+    // HTTP call-event response.
+    for (let attempt = 0; attempt < 20 && incomingCallPushes.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    assert.deepEqual(incomingCallPushes, [{
+      callerId: initiatorId,
+      recipientIds: [inviteeId],
+      callId: event.callId,
+      conversationId: event.conversationId,
+    }]);
+
+    incomingCallPushes.length = 0;
+
+    const videoResponse = await postEvent({ ...event, type: "VIDEO" });
+    assert.equal(videoResponse.status, 202);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(incomingCallPushes.length, 0);
+
+    const updateResponse = await postEvent({
+      ...event,
+      type: "AUDIO",
+      eventType: "updated",
+    });
+    assert.equal(updateResponse.status, 202);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(incomingCallPushes.length, 0);
+  });
+
   it("delivers a validated event to participant rooms only", async () => {
+    emitted.length = 0;
+    roomCalls.length = 0;
+
     const response = await postEvent(event);
 
     assert.equal(response.status, 202);

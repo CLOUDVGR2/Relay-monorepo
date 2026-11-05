@@ -6,7 +6,7 @@ export interface CallEventPayload {
   callId: string;
   conversationId: string;
   initiatorId: string;
-  type: 'AUDIO' | 'VIDEO';
+  type: 'AUDIO';
   status: 'RINGING' | 'ACTIVE' | 'ENDED' | 'CANCELLED';
   participantIds: string[];
   createdAt: string;

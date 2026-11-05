@@ -4,6 +4,7 @@
 from app.agentops.routes import router as incidents_router
 from app.agentops.conversation_routes import router as conversation_analysis_router
 from app.rag.routes import router as documents_router
+from app.multi_agent.routes import router as multi_agent_router
 import os
 import math
 import time
@@ -48,6 +49,8 @@ app.include_router(incidents_router)
 app.include_router(conversation_analysis_router)
 
 app.include_router(documents_router)
+
+app.include_router(multi_agent_router)
 
 # Process-local metrics: bounded samples and low-cardinality route labels.
 MAX_LATENCY_SAMPLES = 2048

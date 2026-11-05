@@ -25,7 +25,15 @@ export class HttpAuthGuard implements CanActivate {
     const request =
       context.switchToHttp().getRequest<AuthenticatedHttpRequest>();
 
-    const userId = this.jwtAuthService.verifyToken(request.cookies?.jwt);
+    // Support web cookie sessions and mobile Bearer-token requests.
+    const authorization = request.headers.authorization;
+    const bearerToken =
+      typeof authorization === 'string' &&
+      /^Bearer\s+\S+$/i.test(authorization)
+        ? authorization.replace(/^Bearer\s+/i, '')
+        : undefined;
+    const token = request.cookies?.jwt ?? bearerToken;
+    const userId = this.jwtAuthService.verifyToken(token);
     const accountExists = await this.authUserService.exists(userId);
 
     if (!accountExists) {

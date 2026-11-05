@@ -136,6 +136,9 @@ model ConversationParticipant {
   /// Timestamp recording when the user joined the conversation.
   joinedAt DateTime @default(now())
 
+  /// When set, hide this conversation from this user's list.
+  hiddenAt DateTime? @db.Timestamp(3)
+
   /// Connect this membership to its conversation.
   ///
   /// If the conversation is deleted, PostgreSQL also deletes its
@@ -239,7 +242,6 @@ model TaskLink {
 
 enum CallType {
   AUDIO
-  VIDEO
 }
 
 enum CallStatus {
@@ -258,7 +260,42 @@ enum CallParticipantStatus {
   LEFT
 }
 
-/// Persistent metadata for an audio or video call.
+enum CallRecordingStatus {
+  PENDING
+  UPLOADING
+  UPLOADED
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum CallAudioTrackKind {
+  LOCAL_MICROPHONE
+  REMOTE_PARTICIPANT
+}
+
+enum CallTranscriptStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum CallSummaryStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum CallProcessingJobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+/// Persistent metadata for an audio call.
 model CallSession {
   id             String     @id @default(uuid()) @db.Uuid
   conversationId String     @db.Uuid
@@ -273,6 +310,8 @@ model CallSession {
 
   conversation Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   participants CallParticipant[]
+  recording   CallRecording?
+  summary     CallSummary?
 
   @@index([conversationId, createdAt(sort: Desc)])
   @@index([status, createdAt])
@@ -286,9 +325,12 @@ model CallParticipant {
   userId      String
   status      CallParticipantStatus @default(INVITED)
   invitedAt   DateTime              @default(now())
-  respondedAt DateTime?
-  joinedAt    DateTime?
-  leftAt      DateTime?
+  respondedAt        DateTime?
+  recordingConsent   Boolean?
+  recordingConsentAt DateTime?
+  joinedAt            DateTime?
+  leftAt              DateTime?
+  hiddenAt            DateTime?             @db.Timestamp(3)
 
   call CallSession @relation(fields: [callId], references: [id], onDelete: Cascade)
 
@@ -297,3 +339,100 @@ model CallParticipant {
   @@index([callId, status])
   @@map("call_participants")
 }
+
+/// Private-storage metadata for the two separately captured sides of a call.
+model CallRecording {
+  id          String              @id @default(uuid()) @db.Uuid
+  callId      String              @unique @db.Uuid
+  status      CallRecordingStatus @default(PENDING)
+  uploadedAt  DateTime?
+  processedAt DateTime?
+  failureCode String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  call          CallSession          @relation(fields: [callId], references: [id], onDelete: Cascade)
+  tracks        CallRecordingTrack[]
+  processingJob CallProcessingJob?
+
+  @@index([status, createdAt])
+  @@map("call_recordings")
+}
+
+/// One independently uploaded PCM object for each side of the call.
+model CallRecordingTrack {
+  id          String             @id @default(uuid()) @db.Uuid
+  recordingId String             @db.Uuid
+  kind        CallAudioTrackKind
+  objectKey   String             @unique
+  contentType String             @default("audio/pcm")
+  sampleRate  Int
+  channels    Int
+  sampleCount BigInt
+  durationMs  Int
+  byteSize    BigInt
+  sha256      String
+  createdAt   DateTime           @default(now())
+
+  recording  CallRecording  @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  transcript CallTranscript?
+
+  @@unique([recordingId, kind])
+  @@index([recordingId])
+  @@map("call_recording_tracks")
+}
+
+/// Transcript state and text for one captured side of a call.
+model CallTranscript {
+  id          String               @id @default(uuid()) @db.Uuid
+  trackId     String               @unique @db.Uuid
+  status      CallTranscriptStatus @default(QUEUED)
+  text        String?              @db.Text
+  language    String?
+  failureCode String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  track CallRecordingTrack @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@map("call_transcripts")
+}
+
+/// One generated summary per call.
+model CallSummary {
+  id          String            @id @default(uuid()) @db.Uuid
+  callId      String            @unique @db.Uuid
+  status      CallSummaryStatus @default(QUEUED)
+  summary     String?           @db.Text
+  keyPoints   Json?
+  actionItems Json?
+  failureCode String?
+  generatedAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  call CallSession @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@map("call_summaries")
+}
+
+/// Durable, idempotent work item with a lease for crash recovery and retries.
+model CallProcessingJob {
+  id            String                  @id @default(uuid()) @db.Uuid
+  recordingId   String                  @unique @db.Uuid
+  status        CallProcessingJobStatus @default(QUEUED)
+  attempts      Int                     @default(0)
+  availableAt   DateTime                @default(now())
+  lockedAt      DateTime?
+  leaseToken    String?
+  lastErrorCode String?
+  completedAt   DateTime?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  recording CallRecording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+
+  @@index([status, availableAt])
+  @@map("call_processing_jobs")
+}
+

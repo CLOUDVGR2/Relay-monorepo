@@ -6,15 +6,23 @@ import {
   Logger,
   NotFoundException,
   Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import {
+  CallAudioTrackKind,
   CallParticipantStatus as PrismaParticipantStatus,
+  CallRecordingStatus,
   CallStatus as PrismaCallStatus,
+  CallSummaryStatus,
+  CallTranscriptStatus,
   CallType as PrismaCallType,
 } from '../generated/prisma/enums.js';
+import { AIService } from '../ai/ai.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import type { CallSessionGetPayload } from '../generated/prisma/models.js';
 import { CallEventsPublisher } from './call-events.publisher.js';
 import type {
+  AcceptCallInput,
   CallActionInput,
   CallHistoryInput,
   CreateCallInput,
@@ -26,6 +34,27 @@ const callInclude = {
   },
 };
 
+const callDetailsInclude = {
+  ...callInclude,
+  recording: {
+    include: {
+      tracks: {
+        orderBy: { kind: 'asc' as const },
+        include: { transcript: true },
+      },
+    },
+  },
+  summary: true,
+};
+
+type CallWithArtifacts = CallSessionGetPayload<{
+  include: typeof callDetailsInclude;
+}>;
+
+type CallWithoutArtifacts = CallSessionGetPayload<{
+  include: typeof callInclude;
+}>;
+
 @Injectable()
 export class CallsService {
   private readonly logger = new Logger(CallsService.name);
@@ -33,9 +62,14 @@ export class CallsService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly callEventsPublisher?: CallEventsPublisher,
+    @Optional() private readonly aiService?: AIService,
   ) {}
 
   async create(input: CreateCallInput, actorId: string) {
+    if (input.type !== 'AUDIO') {
+      throw new BadRequestException('Only audio calls are supported');
+    }
+
     const actor = actorId.toLowerCase();
 
     const conversation = await this.prisma.conversation.findFirst({
@@ -93,37 +127,104 @@ export class CallsService {
       );
     }
 
-    const now = new Date();
-
-    const created = await this.prisma.callSession.create({
-      data: {
+    // Reuse a matching pending or active call so repeated requests
+    // cannot create another invitation for the same conversation and media type.
+    const activeCalls = await this.prisma.callSession.findMany({
+      where: {
         conversationId: conversation.id,
-        initiatorId: actor,
         type: input.type as PrismaCallType,
-        status: PrismaCallStatus.RINGING,
-        participants: {
-          create: [
-            {
-              userId: actor,
-              status: PrismaParticipantStatus.ACCEPTED,
-              respondedAt: now,
-              joinedAt: now,
-            },
-            ...invitees.map((userId) => ({
-              userId,
-              status: PrismaParticipantStatus.INVITED,
-            })),
-          ],
+        status: {
+          in: [PrismaCallStatus.RINGING, PrismaCallStatus.ACTIVE],
         },
       },
       include: callInclude,
     });
 
+    // Only one ringing or active call of each media type may exist
+    // in a conversation. Repeated requests reuse it even if the
+    // repeated request contains a different participant list.
+    const existingCall = activeCalls[0];
+
+    if (existingCall) {
+      return { ...existingCall, created: false };
+    }
+
+    const now = new Date();
+
+    let created;
+
+    try {
+      created = await this.prisma.callSession.create({
+        data: {
+          conversationId: conversation.id,
+          initiatorId: actor,
+          type: input.type as PrismaCallType,
+          status: PrismaCallStatus.RINGING,
+          participants: {
+            create: [
+              {
+                userId: actor,
+                status: PrismaParticipantStatus.ACCEPTED,
+                respondedAt: now,
+                recordingConsent: input.recordingConsent === true,
+                recordingConsentAt: now,
+                joinedAt: now,
+              },
+              ...invitees.map((userId) => ({
+                userId,
+                status: PrismaParticipantStatus.INVITED,
+              })),
+            ],
+          },
+        },
+        include: callInclude,
+      });
+    } catch (error) {
+      // The partial unique index arbitrates concurrent create requests.
+      // If another request won, return its open call instead of failing.
+      const isUniqueConflict =
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'P2002';
+
+      if (!isUniqueConflict) {
+        throw error;
+      }
+
+      const concurrentCall = await this.prisma.callSession.findFirst({
+        where: {
+          conversationId: conversation.id,
+          type: input.type as PrismaCallType,
+          status: {
+            in: [PrismaCallStatus.RINGING, PrismaCallStatus.ACTIVE],
+          },
+        },
+        include: callInclude,
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (!concurrentCall) {
+        throw error;
+      }
+
+      return { ...concurrentCall, created: false };
+    }
+
+    const savedInitiator = created.participants.find(
+      (participant) => participant.userId.toLowerCase() === actor,
+    );
+
+    console.info('[NEST][PASS] Initiator recording consent saved', {
+      callId: created.id,
+      recordingConsent: savedInitiator?.recordingConsent,
+    });
+
     await this.publishCallEvent(created, 'invitation');
-    return created;
+    return { ...created, created: true };
   }
 
-  async accept(input: CallActionInput, actorId: string) {
+  async accept(input: AcceptCallInput, actorId: string) {
     const actor = actorId.toLowerCase();
     const call = await this.findAuthorizedCall(input.callId, actor);
 
@@ -184,6 +285,8 @@ export class CallsService {
         data: {
           status: PrismaParticipantStatus.ACCEPTED,
           respondedAt: now,
+          recordingConsent: input.recordingConsent === true,
+          recordingConsentAt: now,
           joinedAt: now,
         },
       });
@@ -196,6 +299,16 @@ export class CallsService {
     });
 
     const updated = await this.findAuthorizedCall(call.id, actor);
+    const savedParticipant = updated.participants.find(
+      (participant) => participant.userId.toLowerCase() === actor,
+    );
+
+    console.info('[NEST][PASS] Invitee recording consent saved', {
+      callId: input.callId,
+      userId: actor,
+      recordingConsent: savedParticipant?.recordingConsent,
+    });
+
     await this.publishCallEvent(updated, 'updated');
     return updated;
   }
@@ -333,6 +446,39 @@ export class CallsService {
     return updated;
   }
 
+  async deleteCallHistory(
+    input: CallActionInput,
+    actorId: string,
+  ): Promise<boolean> {
+    const actor = actorId.toLowerCase();
+    const call = await this.findAuthorizedCall(input.callId, actor);
+
+    if (call.initiatorId.toLowerCase() !== actor) {
+      throw new BadRequestException(
+        'Only the person who initiated the call can delete this invitation',
+      );
+    }
+
+    if (call.status !== PrismaCallStatus.CANCELLED) {
+      throw new BadRequestException(
+        'Only cancelled invitations can be deleted from call history',
+      );
+    }
+
+    // Soft-delete only this user's history entry. A zero count is acceptable:
+    // it makes repeating the request idempotent without changing shared data.
+    await this.prisma.callParticipant.updateMany({
+      where: {
+        callId: call.id,
+        userId: actor,
+        hiddenAt: null,
+      },
+      data: { hiddenAt: new Date() },
+    });
+
+    return true;
+  }
+
   private async publishCallEvent(
     call: {
       id: string;
@@ -371,25 +517,208 @@ export class CallsService {
 
     return this.prisma.callSession.findMany({
       where: {
-        participants: { some: { userId: actor } },
+        participants: { some: { userId: actor, hiddenAt: null } },
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit,
-      include: callInclude,
+      include: callDetailsInclude,
     });
   }
 
-  async getCall(input: CallActionInput, actorId: string) {
-    return this.findAuthorizedCall(input.callId, actorId.toLowerCase());
+  /**
+   * Authorize signaling only for an active, accepted, two-person call.
+   * Return the peer identity only; never expose the full call record.
+   */
+  async authorizeMediaSession(callId: string, actorId: string) {
+    const actor = actorId.toLowerCase();
+    const call = await this.findAuthorizedCall(callId, actor);
+
+    const accepted = call.participants.filter(
+      (participant) => participant.status === PrismaParticipantStatus.ACCEPTED,
+    );
+
+    if (
+      call.status !== PrismaCallStatus.ACTIVE ||
+      call.participants.length !== 2 ||
+      accepted.length !== 2
+    ) {
+      throw new NotFoundException('Eligible media session not found');
+    }
+
+    const peer = accepted.find(
+      (participant) => participant.userId.toLowerCase() !== actor,
+    );
+
+    if (!peer) {
+      throw new NotFoundException('Eligible media session not found');
+    }
+
+    // Recording is opt-in and requires both accepted participants.
+    const recordingAuthorized = accepted.every(
+      (participant) => participant.recordingConsent === true,
+    );
+
+    console.info('[NEST][PASS] Recording authorization calculated', {
+      callId,
+      acceptedCount: accepted.length,
+      consents: accepted.map((p) => ({
+        userId: p.userId,
+        consent: p.recordingConsent,
+      })),
+      recordingAuthorized,
+    });
+
+    if (recordingAuthorized) {
+      // Both accepted participants may authorize signaling concurrently.
+      // The unique callId constraint makes this initialization idempotent.
+      await this.prisma.callRecording.upsert({
+        where: { callId: call.id },
+        create: { callId: call.id },
+        update: {},
+      });
+    }
+
+    return {
+      callId: call.id,
+      peerId: peer.userId,
+      type: call.type,
+      recordingAuthorized,
+    };
   }
 
-  private async findAuthorizedCall(callId: string, actor: string) {
+  async getCall(input: CallActionInput, actorId: string) {
+    return this.findAuthorizedCall(input.callId, actorId.toLowerCase(), true);
+  }
+
+  async generateSummary(input: CallActionInput, actorId: string) {
+    const actor = actorId.toLowerCase();
+    const call = await this.findAuthorizedCall(input.callId, actor, true);
+
+    if (call.status !== PrismaCallStatus.ENDED) {
+      throw new BadRequestException(
+        'A call must be ended before it can be summarized.',
+      );
+    }
+
+    if (call.summary?.status === CallSummaryStatus.COMPLETED) {
+      return call;
+    }
+
+    if (call.summary?.status === CallSummaryStatus.PROCESSING) {
+      throw new BadRequestException(
+        'A summary is already being generated for this call.',
+      );
+    }
+
+    if (
+      !call.recording ||
+      call.recording.status !== CallRecordingStatus.READY
+    ) {
+      throw new BadRequestException(
+        'The call recording is not ready for summarization.',
+      );
+    }
+
+    const completedTracks = call.recording.tracks.filter(
+      (track) =>
+        track.transcript?.status === CallTranscriptStatus.COMPLETED &&
+        !!track.transcript.text?.trim(),
+    );
+
+    if (completedTracks.length === 0) {
+      throw new BadRequestException(
+        'A completed transcript is required before a call can be summarized.',
+      );
+    }
+
+    if (!this.aiService) {
+      throw new ServiceUnavailableException(
+        'Call summary generation is not configured.',
+      );
+    }
+
+    await this.prisma.callSummary.upsert({
+      where: { callId: call.id },
+      create: {
+        callId: call.id,
+        status: CallSummaryStatus.PROCESSING,
+      },
+      update: {
+        status: CallSummaryStatus.PROCESSING,
+        failureCode: null,
+      },
+    });
+
+    try {
+      const analysis = await this.aiService.analyzeConversation(
+        completedTracks.map((track) => ({
+          sender:
+            track.kind === CallAudioTrackKind.LOCAL_MICROPHONE
+              ? 'You'
+              : 'Other participant',
+          text: track.transcript!.text!.trim(),
+        })),
+      );
+
+      await this.prisma.callSummary.upsert({
+        where: { callId: call.id },
+        create: {
+          callId: call.id,
+          status: CallSummaryStatus.COMPLETED,
+          summary: analysis.summary,
+          keyPoints: analysis.decisions,
+          actionItems: analysis.action_items,
+          generatedAt: new Date(),
+        },
+        update: {
+          status: CallSummaryStatus.COMPLETED,
+          summary: analysis.summary,
+          keyPoints: analysis.decisions,
+          actionItems: analysis.action_items,
+          failureCode: null,
+          generatedAt: new Date(),
+        },
+      });
+    } catch (error) {
+      await this.prisma.callSummary.upsert({
+        where: { callId: call.id },
+        create: {
+          callId: call.id,
+          status: CallSummaryStatus.FAILED,
+          failureCode: 'AI_ANALYSIS_FAILED',
+        },
+        update: {
+          status: CallSummaryStatus.FAILED,
+          failureCode: 'AI_ANALYSIS_FAILED',
+        },
+      });
+      throw error;
+    }
+
+    return this.findAuthorizedCall(call.id, actor, true);
+  }
+
+  private findAuthorizedCall(
+    callId: string,
+    actor: string,
+    includeArtifacts: true,
+  ): Promise<CallWithArtifacts>;
+  private findAuthorizedCall(
+    callId: string,
+    actor: string,
+    includeArtifacts?: false,
+  ): Promise<CallWithoutArtifacts>;
+  private async findAuthorizedCall(
+    callId: string,
+    actor: string,
+    includeArtifacts = false,
+  ): Promise<CallWithArtifacts | CallWithoutArtifacts> {
     const call = await this.prisma.callSession.findFirst({
       where: {
         id: callId,
         participants: { some: { userId: actor } },
       },
-      include: callInclude,
+      include: includeArtifacts ? callDetailsInclude : callInclude,
     });
 
     if (!call) {

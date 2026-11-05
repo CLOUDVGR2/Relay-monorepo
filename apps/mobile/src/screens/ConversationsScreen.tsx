@@ -74,7 +74,61 @@ export function ConversationsScreen({ navigation, user, onLogout }: Props) {
   }, []);
 
   return <Screen>
-    <View style={styles.top}><View><Text style={styles.eyebrow}>YOUR WORKSPACE</Text><Heading title="Messages" subtitle={`Signed in as ${user.fullName}`} /></View><View style={styles.actions}><Pressable accessibilityRole="button" onPress={() => navigation.navigate('Tasks')} style={[styles.aiButton, { marginRight: 8 }]}><Text style={styles.aiButtonText}>Tasks</Text></Pressable><Pressable accessibilityRole="button" onPress={() => navigation.navigate('AI')} style={styles.aiButton}><Text style={styles.aiButtonText}>✦ AI</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void onLogout()} style={styles.logout}><Text style={styles.logoutText}>Log out</Text></Pressable></View></View>
+    <View style={styles.top}>
+      <View style={styles.navBar}>
+        <View style={styles.navActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open calls"
+            onPress={() => navigation.navigate('Calls')}
+            style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.navButtonText} numberOfLines={1}>Calls</Text>
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open tasks"
+            onPress={() => navigation.navigate('Tasks')}
+            style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.navButtonText} numberOfLines={1}>Tasks</Text>
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open multi-agent tasks"
+            onPress={() => navigation.navigate('MultiAgentTasks')}
+            style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.navButtonText} numberOfLines={1}>Agents</Text>
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open AI assistant"
+            onPress={() => navigation.navigate('AI')}
+            style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.navButtonText} numberOfLines={1}>✦ AI</Text>
+          </Pressable>
+        </View>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Log out of Relay"
+          onPress={() => void onLogout()}
+          style={({ pressed }) => [styles.logout, pressed && styles.pressed]}
+        >
+          <Text style={styles.logoutText} numberOfLines={1}>Logout</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.heading}>
+        <Text style={styles.eyebrow}>YOUR WORKSPACE</Text>
+        <Heading title="Messages" subtitle={`Signed in as ${user.fullName}`} />
+      </View>
+    </View>
     <ErrorText>{error}</ErrorText>
     {loading ? <View style={styles.center}><ActivityIndicator color={colors.primary} size="large" /><Text style={styles.muted}>Loading your people…</Text></View> : <FlatList data={people} keyExtractor={(person) => person._id} contentContainerStyle={people.length ? styles.list : styles.emptyList} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadPeople(true)} tintColor={colors.primary} />} renderItem={({ item }) => {
       const isOnline = online.includes(String(item._id));
@@ -83,4 +137,54 @@ export function ConversationsScreen({ navigation, user, onLogout }: Props) {
   </Screen>;
 }
 
-const styles = StyleSheet.create({ top: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }, actions: { flexDirection: 'row', alignItems: 'center', gap: 7 }, aiButton: { paddingVertical: 9, paddingHorizontal: 12, borderRadius: 10, backgroundColor: colors.surfaceRaised, borderWidth: 1, borderColor: colors.border, marginTop: 5 }, aiButtonText: { color: colors.primary, fontSize: 12, fontWeight: '800' }, eyebrow: { color: colors.primary, fontSize: 10, letterSpacing: 2, fontWeight: '800', marginBottom: 10 }, logout: { paddingVertical: 9, paddingHorizontal: 12, borderRadius: 10, borderColor: colors.border, borderWidth: 1, marginTop: 5 }, logoutText: { color: colors.muted, fontSize: 12, fontWeight: '700' }, list: { paddingTop: 12, paddingBottom: 30 }, emptyList: { flexGrow: 1, justifyContent: 'center' }, person: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, paddingHorizontal: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, gap: 12 }, pressed: { opacity: 0.65 }, personDetails: { flex: 1, gap: 4 }, personName: { color: colors.text, fontWeight: '700', fontSize: 15 }, personEmail: { color: colors.muted, fontSize: 12 }, personRight: { alignItems: 'flex-end', gap: 5 }, statusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.muted }, statusOnline: { backgroundColor: colors.success }, statusText: { color: colors.muted, fontSize: 10 }, presence: { position: 'absolute', width: 12, height: 12, borderRadius: 6, backgroundColor: colors.muted, borderWidth: 2, borderColor: colors.background, right: 0, bottom: 0 }, presenceOnline: { backgroundColor: colors.success }, center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }, muted: { color: colors.muted, fontSize: 13, lineHeight: 19 }, empty: { alignItems: 'center', gap: 8, paddingHorizontal: 18 }, emptyTitle: { color: colors.text, fontSize: 17, fontWeight: '800', textAlign: 'center' } });
+const styles = StyleSheet.create({ top: { gap: 16, paddingBottom: 4 },
+  navBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    width: '100%',
+  },
+  navActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 1,
+  },
+  navButton: {
+    paddingVertical: 9,
+    paddingHorizontal: 11,
+    borderRadius: 10,
+    backgroundColor: colors.surfaceRaised,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navButtonText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  heading: { gap: 2 },
+  eyebrow: {
+    color: colors.primary,
+    fontSize: 10,
+    letterSpacing: 2,
+    fontWeight: '800',
+    marginBottom: 8,
+  },
+  logout: {
+    flexShrink: 0,
+    paddingVertical: 9,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderColor: colors.border,
+    borderWidth: 1,
+    backgroundColor: colors.surface,
+  },
+  logoutText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '700',
+  }, list: { paddingTop: 12, paddingBottom: 30 }, emptyList: { flexGrow: 1, justifyContent: 'center' }, person: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, paddingHorizontal: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, gap: 12 }, pressed: { opacity: 0.65 }, personDetails: { flex: 1, gap: 4 }, personName: { color: colors.text, fontWeight: '700', fontSize: 15 }, personEmail: { color: colors.muted, fontSize: 12 }, personRight: { alignItems: 'flex-end', gap: 5 }, statusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.muted }, statusOnline: { backgroundColor: colors.success }, statusText: { color: colors.muted, fontSize: 10 }, presence: { position: 'absolute', width: 12, height: 12, borderRadius: 6, backgroundColor: colors.muted, borderWidth: 2, borderColor: colors.background, right: 0, bottom: 0 }, presenceOnline: { backgroundColor: colors.success }, center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }, muted: { color: colors.muted, fontSize: 13, lineHeight: 19 }, empty: { alignItems: 'center', gap: 8, paddingHorizontal: 18 }, emptyTitle: { color: colors.text, fontSize: 17, fontWeight: '800', textAlign: 'center' } });

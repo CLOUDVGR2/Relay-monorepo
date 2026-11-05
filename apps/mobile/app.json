@@ -8,7 +8,11 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.relay.mobile"
+      "bundleIdentifier": "com.relay.mobile",
+      "bitcode": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.relay.mobile",
@@ -16,7 +20,14 @@
     },
     "plugins": [
       "expo-secure-store",
-      "expo-notifications"
+      "expo-notifications",
+      "expo-sqlite",
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "microphonePermission": "Relay uses your microphone during audio calls."
+        }
+      ]
     ],
     "extra": {
       "apiUrlHelp": "Set EXPO_PUBLIC_API_URL to your reachable HTTPS API base URL ending in /api. Use a LAN IP for a physical device.",

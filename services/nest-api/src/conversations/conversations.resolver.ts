@@ -14,6 +14,7 @@ import {
   ConversationMessagesInput,
   ConversationType,
   CreateConversationInput,
+  HideConversationInput,
   CreateMessageInput,
   PaginatedMessagesType,
   UpdateConversationDetailsInput,
@@ -97,6 +98,18 @@ export class ConversationsResolver {
       input.participantIds,
       input.name,
       input.description,
+    );
+  }
+
+  // Hide a conversation only for the authenticated account.
+  @Mutation(() => Boolean, { name: 'hideConversation' })
+  hideConversation(
+    @Args('input') input: HideConversationInput,
+    @Context('req') request: AuthenticatedRequest,
+  ) {
+    return this.conversationsService.hideConversation(
+      input.conversationId,
+      request.user!.id,
     );
   }
 

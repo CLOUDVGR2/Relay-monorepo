@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, getErrorMessage } from '../lib/api';
+import { readCachedMessages, writeCachedMessages } from '../lib/offline-message-cache';
+import * as Network from 'expo-network';
 import { getRealtimeSocket } from '../lib/realtime';
 import { Avatar, Button, ErrorText } from '../components/Ui';
 import { Screen } from '../components/Screen';
@@ -8,7 +10,7 @@ import { colors } from '../theme/colors';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'Conversation'>;
+type Props = NativeStackScreenProps<RootStackParamList, 'Conversation'> & { userId: string };
 type ReplyPreview = {
   _id: string;
   senderId: string;
@@ -29,7 +31,7 @@ type Message = {
   replyTo?: ReplyPreview | null;
 };
 
-export function ConversationScreen({ route }: Props) {
+export function ConversationScreen({ route, userId }: Props) {
   // Read the peer from the shared, typed navigation contract.
   const { person } = route.params;
   const [messages, setMessages] = useState<Message[]>([]);
@@ -79,9 +81,10 @@ export function ConversationScreen({ route }: Props) {
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
     typingTimeout.current = setTimeout(stopTyping, 1500);
   }, [person._id, stopTyping]);
-  // Tie loading to the selected peer so old messages aren't shown during navigation.
-  const [loadedPersonId, setLoadedPersonId] = useState<string | null>(null);
-  const loading = loadedPersonId !== person._id;
+  // Scope loaded history to both the signed-in account and selected peer.
+  const scopeKey = `${userId}:${person._id}`;
+  const [loadedScopeKey, setLoadedScopeKey] = useState<string | null>(null);
+  const loading = loadedScopeKey !== scopeKey;
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [olderCursor, setOlderCursor] = useState<string | null>(null);
@@ -89,6 +92,45 @@ export function ConversationScreen({ route }: Props) {
   const [error, setError] = useState('');
   const [historyAttempt, setHistoryAttempt] = useState(0);
   const [historyFailed, setHistoryFailed] = useState(false);
+  const [networkConnected, setNetworkConnected] = useState<boolean | null | undefined>(null);
+  const [networkInternetReachable, setNetworkInternetReachable] = useState<boolean | null | undefined>(null);
+  const networkUpdateVersion = useRef(0);
+
+  useEffect(() => {
+    let active = true;
+    const initialVersion = networkUpdateVersion.current;
+
+    const subscription = Network.addNetworkStateListener((state) => {
+      networkUpdateVersion.current += 1;
+      setNetworkConnected(state.isConnected);
+      setNetworkInternetReachable(state.isInternetReachable);
+    });
+
+    void Network.getNetworkStateAsync()
+      .then((state) => {
+        if (!active || networkUpdateVersion.current !== initialVersion) return;
+        setNetworkConnected(state.isConnected);
+        setNetworkInternetReachable(state.isInternetReachable);
+      })
+      .catch(() => {
+        // Connectivity is unknown; the conversation itself remains usable.
+      });
+
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
+
+  const networkOffline =
+    networkConnected === false || networkInternetReachable === false;
+  const connectionNotice = networkOffline
+    ? 'Offline — showing saved messages when available.'
+    : historyFailed
+      ? networkConnected === true
+        ? 'Relay is unreachable — saved messages remain available.'
+        : 'Unable to refresh messages — saved messages remain available.'
+      : null;
   const listRef = useRef<FlatList<Message>>(null);
   const shouldScrollToEnd = useRef(true);
 
@@ -106,36 +148,58 @@ export function ConversationScreen({ route }: Props) {
   }, [person._id]);
 
   useEffect(() => {
-    // Cancel history loading if this screen closes or the selected peer changes.
     const controller = new AbortController();
 
-    api.get<Message[]>(`/messages/${person._id}`, {
-      params: { limit: 50 },
-      signal: controller.signal,
-    })
-      .then((response) => {
+    setHistoryFailed(false);
+    setError('');
+    setHasMore(false);
+    setOlderCursor(null);
+
+    const loadHistory = async () => {
+      try {
+        // Render saved history first when available; cache failures are non-fatal.
+        const cached = await readCachedMessages(userId, person._id);
         if (controller.signal.aborted) return;
-        setMessages(Array.isArray(response.data) ? response.data : []);
+
+        setMessages(cached as Message[]);
+        if (cached.length > 0) {
+          setLoadedScopeKey(scopeKey);
+          shouldScrollToEnd.current = true;
+        }
+
+        const response = await api.get<Message[]>(`/messages/${person._id}`, {
+          params: { limit: 50 },
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+
+        const serverMessages = Array.isArray(response.data) ? response.data : [];
+        setMessages(serverMessages);
+        void writeCachedMessages(userId, person._id, serverMessages);
         void markMessagesRead();
         setHasMore(response.headers['x-has-more'] === 'true');
         setOlderCursor(response.headers['x-next-cursor'] || null);
         shouldScrollToEnd.current = true;
         setError('');
         setHistoryFailed(false);
-      })
-      .catch((requestError: unknown) => {
+      } catch (requestError: unknown) {
         if (!controller.signal.aborted) {
           setHistoryFailed(true);
-          setError(getErrorMessage(requestError, 'Unable to load this conversation.'));
+          setError(
+            getErrorMessage(
+              requestError,
+              'Unable to refresh this conversation. Showing saved messages if available.',
+            ),
+          );
         }
-      })
-      .finally(() => {
-        // Only the active request may mark this peer's history as loaded.
-        if (!controller.signal.aborted) setLoadedPersonId(person._id);
-      });
+      } finally {
+        if (!controller.signal.aborted) setLoadedScopeKey(scopeKey);
+      }
+    };
 
+    void loadHistory();
     return () => controller.abort();
-  }, [person._id, historyAttempt, markMessagesRead]);
+  }, [userId, person._id, scopeKey, historyAttempt, markMessagesRead]);
 
   useEffect(() => {
     const socket = getRealtimeSocket();
@@ -167,6 +231,7 @@ export function ConversationScreen({ route }: Props) {
       // Keep the screen scoped to this peer and acknowledge incoming messages.
       if (String(message.senderId) === String(person._id) || String(message.receiverId) === String(person._id)) {
         appendUnique(message);
+        void writeCachedMessages(userId, person._id, [message]);
       }
       if (String(message.senderId) === String(person._id)) {
         void markMessagesRead();
@@ -188,6 +253,7 @@ export function ConversationScreen({ route }: Props) {
             : item
         )
       );
+      void writeCachedMessages(userId, person._id, [message]);
     };
 
     const onMessagesRead = (payload: { readerId?: string; messageIds?: string[]; readAt?: string }) => {
@@ -210,7 +276,7 @@ export function ConversationScreen({ route }: Props) {
       socket.off('messageUpdated', onMessageUpdated);
       socket.off('messagesRead', onMessagesRead);
     };
-  }, [person._id, appendUnique, markMessagesRead]);
+  }, [userId, person._id, appendUnique, markMessagesRead]);
 
   useEffect(() => {
     if (messages.length && shouldScrollToEnd.current) {
@@ -229,6 +295,7 @@ export function ConversationScreen({ route }: Props) {
         params: { limit: 50, before: olderCursor },
       });
       const olderMessages = Array.isArray(response.data) ? response.data : [];
+      void writeCachedMessages(userId, person._id, olderMessages);
       setMessages((current) => {
         const byId = new Map<string, Message>();
         for (const item of [...olderMessages, ...current]) byId.set(String(item._id), item);
@@ -259,6 +326,7 @@ export function ConversationScreen({ route }: Props) {
         ...(replyTo ? { replyTo: replyTo._id } : {}),
       });
       appendUnique(data);
+      void writeCachedMessages(userId, person._id, [data]);
       setReplyTo(null);
     } catch (requestError) {
       setDraft(text);
@@ -309,6 +377,7 @@ export function ConversationScreen({ route }: Props) {
             : item
         )
       );
+      void writeCachedMessages(userId, person._id, [data]);
 
       cancelEditing();
     } catch (requestError) {
@@ -320,6 +389,11 @@ export function ConversationScreen({ route }: Props) {
 
   return <Screen>
     <View style={styles.peer}><Avatar name={person.fullName} size={40} /><View style={styles.peerCopy}><Text style={styles.peerName}>{person.fullName}</Text><Text style={styles.peerEmail}>{person.email}</Text></View></View>
+    {connectionNotice ? (
+      <View accessibilityLiveRegion="polite" style={styles.connectionBanner}>
+        <Text style={styles.connectionBannerText}>{connectionNotice}</Text>
+      </View>
+    ) : null}
     {peerTyping ? <Text style={styles.typing}>Typing…</Text> : null}
     <ErrorText>{error}</ErrorText>
     {loading ? (
@@ -327,13 +401,13 @@ export function ConversationScreen({ route }: Props) {
         <ActivityIndicator color={colors.primary} />
         <Text style={styles.helper}>Loading messages…</Text>
       </View>
-    ) : historyFailed ? (
+    ) : historyFailed && messages.length === 0 ? (
       <View style={styles.loadFailure}>
         <Text style={styles.emptyTitle}>Couldn&apos;t load this conversation</Text>
         <Text style={styles.helper}>Check your connection and try again.</Text>
         <Button onPress={() => {
           setError('');
-          setLoadedPersonId(null);
+          setLoadedScopeKey(null);
           setHistoryAttempt((attempt) => attempt + 1);
         }}>Try again</Button>
       </View>
@@ -460,4 +534,4 @@ const styles = StyleSheet.create({
   replyComposer: { flexDirection: 'row', alignItems: 'center', gap: 10, borderLeftWidth: 3, borderLeftColor: colors.primary, backgroundColor: colors.surface, paddingHorizontal: 12, paddingVertical: 9, marginTop: 8, borderRadius: 8 },
   replyComposerCopy: { flex: 1, gap: 3 },
   replyCancel: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
-  peer: { flexDirection: 'row', alignItems: 'center', gap: 11, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 16, marginBottom: 8 }, peerCopy: { flex: 1, gap: 4 }, peerName: { color: colors.text, fontWeight: '800', fontSize: 15 }, peerEmail: { color: colors.muted, fontSize: 11 }, typing: { color: colors.primary, fontSize: 12, paddingVertical: 4 }, messageList: { paddingVertical: 14, gap: 10 }, loadOlder: { alignSelf: 'center', minHeight: 36, justifyContent: 'center', paddingHorizontal: 12, marginBottom: 8 }, loadOlderText: { color: colors.primary, fontSize: 11, fontWeight: '800' }, emptyList: { flexGrow: 1, justifyContent: 'center' }, messageRow: { flexDirection: 'row', width: '100%' }, outgoingRow: { justifyContent: 'flex-end' }, incomingRow: { justifyContent: 'flex-start' }, bubble: { maxWidth: '84%', paddingHorizontal: 13, paddingTop: 10, paddingBottom: 7, borderRadius: 16, gap: 5 }, outgoingBubble: { backgroundColor: colors.outgoing, borderBottomRightRadius: 5 }, incomingBubble: { backgroundColor: colors.incoming, borderBottomLeftRadius: 5 }, messageText: { color: colors.text, fontSize: 14, lineHeight: 20 }, timestamp: { color: '#D4DAEF', opacity: 0.75, fontSize: 9, alignSelf: 'flex-end' }, readReceipt: { color: '#D4DAEF', fontSize: 9, fontWeight: '800', alignSelf: 'flex-end' }, composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 9, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12, paddingBottom: 3 }, input: { flex: 1, maxHeight: 120, minHeight: 48, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, color: colors.text, fontSize: 14 }, send: { height: 48, width: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary }, sendDim: { opacity: 0.55 }, sendText: { color: colors.background, fontWeight: '900', fontSize: 25, marginTop: -3 }, loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }, loadFailure: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 20 }, helper: { color: colors.muted, fontSize: 13, lineHeight: 19 }, empty: { alignItems: 'center', gap: 8 }, emptyTitle: { color: colors.text, fontWeight: '800', fontSize: 18 } });
+  peer: { flexDirection: 'row', alignItems: 'center', gap: 11, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 16, marginBottom: 8 }, peerCopy: { flex: 1, gap: 4 }, peerName: { color: colors.text, fontWeight: '800', fontSize: 15 }, peerEmail: { color: colors.muted, fontSize: 11 }, typing: { color: colors.primary, fontSize: 12, paddingVertical: 4 }, connectionBanner: { backgroundColor: colors.surface, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8, borderWidth: 1, borderColor: colors.border }, connectionBannerText: { color: colors.muted, fontSize: 12, lineHeight: 17 }, messageList: { paddingVertical: 14, gap: 10 }, loadOlder: { alignSelf: 'center', minHeight: 36, justifyContent: 'center', paddingHorizontal: 12, marginBottom: 8 }, loadOlderText: { color: colors.primary, fontSize: 11, fontWeight: '800' }, emptyList: { flexGrow: 1, justifyContent: 'center' }, messageRow: { flexDirection: 'row', width: '100%' }, outgoingRow: { justifyContent: 'flex-end' }, incomingRow: { justifyContent: 'flex-start' }, bubble: { maxWidth: '84%', paddingHorizontal: 13, paddingTop: 10, paddingBottom: 7, borderRadius: 16, gap: 5 }, outgoingBubble: { backgroundColor: colors.outgoing, borderBottomRightRadius: 5 }, incomingBubble: { backgroundColor: colors.incoming, borderBottomLeftRadius: 5 }, messageText: { color: colors.text, fontSize: 14, lineHeight: 20 }, timestamp: { color: '#D4DAEF', opacity: 0.75, fontSize: 9, alignSelf: 'flex-end' }, readReceipt: { color: '#D4DAEF', fontSize: 9, fontWeight: '800', alignSelf: 'flex-end' }, composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 9, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12, paddingBottom: 3 }, input: { flex: 1, maxHeight: 120, minHeight: 48, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, color: colors.text, fontSize: 14 }, send: { height: 48, width: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary }, sendDim: { opacity: 0.55 }, sendText: { color: colors.background, fontWeight: '900', fontSize: 25, marginTop: -3 }, loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }, loadFailure: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 20 }, helper: { color: colors.muted, fontSize: 13, lineHeight: 19 }, empty: { alignItems: 'center', gap: 8 }, emptyTitle: { color: colors.text, fontWeight: '800', fontSize: 18 } });

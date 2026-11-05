@@ -13,6 +13,7 @@ import {
   type AuthenticatedRequest,
 } from '../auth/gql-auth.guard.js';
 import {
+  AcceptCallInput,
   CallActionInput,
   CallHistoryInput,
   CallSessionType,
@@ -35,7 +36,7 @@ export class CallsResolver {
 
   @Mutation(() => CallSessionType, { name: 'acceptCall' })
   acceptCall(
-    @Args('input') input: CallActionInput,
+    @Args('input') input: AcceptCallInput,
     @Context('req') request: AuthenticatedRequest,
   ) {
     return this.callsService.accept(input, request.user!.id);
@@ -55,6 +56,22 @@ export class CallsResolver {
     @Context('req') request: AuthenticatedRequest,
   ) {
     return this.callsService.end(input, request.user!.id);
+  }
+
+  @Mutation(() => CallSessionType, { name: 'generateCallSummary' })
+  generateCallSummary(
+    @Args('input') input: CallActionInput,
+    @Context('req') request: AuthenticatedRequest,
+  ) {
+    return this.callsService.generateSummary(input, request.user!.id);
+  }
+
+  @Mutation(() => Boolean, { name: 'deleteCallHistory' })
+  deleteCallHistory(
+    @Args('input') input: CallActionInput,
+    @Context('req') request: AuthenticatedRequest,
+  ) {
+    return this.callsService.deleteCallHistory(input, request.user!.id);
   }
 
   @Query(() => [CallSessionType], { name: 'callHistory' })

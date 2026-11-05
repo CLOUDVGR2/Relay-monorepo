@@ -4,8 +4,9 @@ import "dotenv/config";
 
 import mongoose from "mongoose";
 import { connectDB } from "./lib/db.js";
-import { disconnectRedis } from "./lib/redis.js";
-import { app, server, closeSocketServer } from "./lib/socket.js";
+import { redis, disconnectRedis } from "./lib/redis.js";
+import { app, server, closeSocketServer, io, getUserRoom } from "./lib/socket.js";
+import { createMultiAgentProgressSubscriber } from "./lib/multi-agent-progress-subscriber.js";
 import { configureApp } from "./app.js";
 
 const NODE_ENV = process.env.NODE_ENV || "development";
@@ -18,6 +19,12 @@ if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
 
 let isShuttingDown = false;
 let shutdownPromise;
+
+const progressSubscriber = createMultiAgentProgressSubscriber({
+  redis,
+  io,
+  getUserRoom,
+});
 
 configureApp(app, () => isShuttingDown);
 
@@ -49,6 +56,9 @@ async function performShutdown(signal) {
     }, SHUTDOWN_TIMEOUT_MS);
 
     forceExit.unref();
+
+    // Stop progress delivery before closing Socket.IO.
+    await progressSubscriber.stop();
 
     // Close Socket.IO and its underlying HTTP server.
     await closeSocketServer();
@@ -93,6 +103,9 @@ async function startServer() {
     // Do not accept traffic until the database connection succeeds.
     await connectDB();
 
+    // Subscribe before accepting traffic so progress delivery is ready.
+    await progressSubscriber.start();
+
     // Start the shared HTTP server used by Socket.IO.
     server.listen(PORT, () => {
       console.log(`Relay API listening on port ${PORT} (${NODE_ENV})`);
@@ -108,6 +121,12 @@ async function startServer() {
     process.exitCode = 1;
 
     // Release resources if startup fails after Redis connects.
+    try {
+      await progressSubscriber.stop();
+    } catch (cleanupError) {
+      console.error("Progress subscriber startup cleanup failed:", cleanupError.message);
+    }
+
     try {
       await mongoose.disconnect();
     } catch (cleanupError) {

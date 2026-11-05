@@ -655,6 +655,284 @@ router.post("/documents/search", trustedOrigin, async (req, res) => {
   }
 });
 
+
+const MULTI_AGENT_TASK_TIMEOUT_MS = 10_000;
+const MULTI_AGENT_TASK_STATUSES = new Set([
+  "queued",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function toPublicTask(task) {
+  if (
+    !isRecord(task) ||
+    typeof task.id !== "string" ||
+    !MULTI_AGENT_TASK_STATUSES.has(task.status) ||
+    !isRecord(task.progress) ||
+    !(task.result === null || isRecord(task.result)) ||
+    !(task.error_code === null || typeof task.error_code === "string") ||
+    !Number.isInteger(task.attempt_count) ||
+    typeof task.created_at !== "string" ||
+    typeof task.updated_at !== "string" ||
+    !(task.started_at === null || typeof task.started_at === "string") ||
+    !(task.finished_at === null || typeof task.finished_at === "string")
+  ) {
+    return null;
+  }
+
+  return {
+    id: task.id,
+    status: task.status,
+    progress: task.progress,
+    result: task.result,
+    error_code: task.error_code,
+    attempt_count: task.attempt_count,
+    created_at: task.created_at,
+    updated_at: task.updated_at,
+    started_at: task.started_at,
+    finished_at: task.finished_at,
+  };
+}
+
+async function requestMultiAgentTask(req, { method, path, body }) {
+  const token = process.env.PYTHON_AI_INTERNAL_TOKEN;
+  if (!token) {
+    const error = new Error("AI service is not configured");
+    error.status = 503;
+    throw error;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    MULTI_AGENT_TASK_TIMEOUT_MS,
+  );
+
+  try {
+    const response = await fetch(`${getPythonBaseUrl()}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Relay-User-Id": String(req.user._id),
+        Accept: "application/json",
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const status =
+        response.status === 404
+          ? 404
+          : [400, 422].includes(response.status)
+            ? 400
+            : response.status === 429
+              ? 429
+              : response.status === 503
+                ? 503
+                : 502;
+
+      const error = new Error("AI task service request failed");
+      error.status = status;
+      throw error;
+    }
+
+    try {
+      return await response.json();
+    } catch {
+      const error = new Error("Invalid AI task service response");
+      error.status = 502;
+      throw error;
+    }
+  } catch (error) {
+    if (error.status) throw error;
+
+    const upstreamError = new Error("AI task service is unavailable");
+    upstreamError.status = error.name === "AbortError" ? 504 : 502;
+    throw upstreamError;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function sendMultiAgentTaskError(res, error) {
+  const status = error.status || 502;
+  const messages = {
+    400: "Invalid multi-agent task request",
+    404: "Task not found",
+    429: "Too many requests. Please try again later.",
+    502: "AI task service is temporarily unavailable",
+    503: "AI task service is temporarily unavailable",
+    504: "AI task service request timed out",
+  };
+
+  return res.status(status).json({
+    success: false,
+    message: messages[status] || messages[502],
+  });
+}
+
+router.post(
+  "/multi-agent/tasks",
+  trustedOrigin,
+  aiAnswerRateLimiter,
+  async (req, res) => {
+    const payload = req.body;
+    if (!isRecord(payload)) {
+      return res.status(400).json({
+        success: false,
+        message: "Provide a valid multi-agent task payload",
+      });
+    }
+
+    const allowedKeys = new Set(["prompt", "max_steps", "timeout_seconds"]);
+    const hasUnknownKey = Object.keys(payload).some(
+      (key) => !allowedKeys.has(key),
+    );
+    const prompt =
+      typeof payload.prompt === "string" ? payload.prompt.trim() : "";
+    const maxSteps = payload.max_steps ?? 8;
+    const timeoutSeconds = payload.timeout_seconds ?? 30;
+
+    if (
+      hasUnknownKey ||
+      prompt.length < 1 ||
+      prompt.length > 4000 ||
+      !Number.isInteger(maxSteps) ||
+      maxSteps < 1 ||
+      maxSteps > 12 ||
+      typeof timeoutSeconds !== "number" ||
+      !Number.isFinite(timeoutSeconds) ||
+      timeoutSeconds <= 0 ||
+      timeoutSeconds > 120
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid multi-agent task payload",
+      });
+    }
+
+    try {
+      const data = await requestMultiAgentTask(req, {
+        method: "POST",
+        path: "/v1/multi-agent/tasks",
+        body: {
+          prompt,
+          max_steps: maxSteps,
+          timeout_seconds: timeoutSeconds,
+        },
+      });
+      const task = toPublicTask(data);
+
+      if (!task) {
+        return res.status(502).json({
+          success: false,
+          message: "AI task service returned an invalid response",
+        });
+      }
+
+      return res.status(201).json(task);
+    } catch (error) {
+      return sendMultiAgentTaskError(res, error);
+    }
+  },
+);
+
+router.get("/multi-agent/tasks", trustedOrigin, async (req, res) => {
+  const limitRaw = req.query.limit;
+  const offsetRaw = req.query.offset;
+  const limit = limitRaw === undefined ? 20 : Number(limitRaw);
+  const offset = offsetRaw === undefined ? 0 : Number(offsetRaw);
+
+  if (
+    (limitRaw !== undefined &&
+      (typeof limitRaw !== "string" || !/^\d+$/.test(limitRaw))) ||
+    (offsetRaw !== undefined &&
+      (typeof offsetRaw !== "string" || !/^\d+$/.test(offsetRaw))) ||
+    !Number.isInteger(limit) ||
+    limit < 1 ||
+    limit > 100 ||
+    !Number.isInteger(offset) ||
+    offset < 0
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Provide limit from 1–100 and a non-negative offset",
+    });
+  }
+
+  try {
+    const query = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    });
+    const data = await requestMultiAgentTask(req, {
+      method: "GET",
+      path: `/v1/multi-agent/tasks?${query.toString()}`,
+    });
+
+    if (!Array.isArray(data)) {
+      return res.status(502).json({
+        success: false,
+        message: "AI task service returned an invalid response",
+      });
+    }
+
+    const tasks = data.map(toPublicTask);
+    if (tasks.some((task) => task === null)) {
+      return res.status(502).json({
+        success: false,
+        message: "AI task service returned an invalid response",
+      });
+    }
+
+    return res.status(200).json(tasks);
+  } catch (error) {
+    return sendMultiAgentTaskError(res, error);
+  }
+});
+
+router.get("/multi-agent/tasks/:taskId", trustedOrigin, async (req, res) => {
+  const { taskId } = req.params;
+
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      taskId,
+    )
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Provide a valid task ID",
+    });
+  }
+
+  try {
+    const data = await requestMultiAgentTask(req, {
+      method: "GET",
+      path: `/v1/multi-agent/tasks/${encodeURIComponent(taskId)}`,
+    });
+    const task = toPublicTask(data);
+
+    if (!task) {
+      return res.status(502).json({
+        success: false,
+        message: "AI task service returned an invalid response",
+      });
+    }
+
+    return res.status(200).json(task);
+  } catch (error) {
+    return sendMultiAgentTaskError(res, error);
+  }
+});
+
 router.get("/runs", trustedOrigin, async (req, res) => {
   const requestedLimit = Number.parseInt(req.query.limit, 10);
   const limit = Number.isInteger(requestedLimit)
