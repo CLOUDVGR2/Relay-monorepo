@@ -100,11 +100,11 @@ router.get("/:id", protectRoute, getMessages);
 
 /**
  * @swagger
- * /api/messages/send/{id}:
+ * /api/messages/read/{id}:
  *   post:
  *     tags: [Messages]
- *     summary: Send a message
- *     description: Sends a message to a specific user. Supports text and image messages. Rate limited to prevent spam.
+ *     summary: Mark conversation messages as read
+ *     description: Marks unread messages from the specified sender as read by the authenticated user.
  *     security:
  *       - cookieAuth: []
  *       - bearerAuth: []
@@ -114,23 +114,118 @@ router.get("/:id", protectRoute, getMessages);
  *         required: true
  *         schema:
  *           type: string
- *         description: MongoDB ObjectId of the message recipient
- *         example: "507f1f77bcf86cd799439011"
+ *         description: MongoDB ObjectId of the other conversation participant
+ *     responses:
+ *       200:
+ *         description: Read status updated, or no unread messages were found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 messageIds:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                 readAt:
+ *                   type: string
+ *                   format: date-time
+ *                   nullable: true
+ *       400:
+ *         description: Invalid sender ID or sender is the authenticated user
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+router.post("/read/:id", protectRoute, markMessagesRead);
+
+/**
+ * @swagger
+ * /api/messages/{id}:
+ *   patch:
+ *     tags: [Messages]
+ *     summary: Edit a sent text message
+ *     description: Updates the text of a message sent by the authenticated user. Only text messages can be edited. The update is broadcast to both conversation participants.
+ *     security:
+ *       - cookieAuth: []
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: MongoDB ObjectId of the message
  *     requestBody:
  *       required: true
  *       content:
- *         multipart/form-data:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [text]
+ *             properties:
+ *               text:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 5000
+ *                 example: "Updated message text"
+ *     responses:
+ *       200:
+ *         description: Message updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Message'
+ *       400:
+ *         description: Invalid message ID, invalid text, or message is not a text message
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
+ */
+router.patch("/:id", protectRoute, editMessage);
+
+/**
+ * @swagger
+ * /api/messages/send/{id}:
+ *   post:
+ *     tags: [Messages]
+ *     summary: Send a message
+ *     description: Sends a text message, image message, or both. Images must be supported Base64 image data URIs and must not exceed 7 MiB. A reply target must belong to this conversation. Rate limited.
+ *     security:
+ *       - cookieAuth: []
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: MongoDB ObjectId of the recipient
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
  *           schema:
  *             type: object
  *             properties:
  *               text:
  *                 type: string
- *                 description: Message text content
+ *                 maxLength: 5000
  *                 example: "Hello, how are you?"
  *               image:
  *                 type: string
- *                 format: binary
- *                 description: Image file (max 5MB)
+ *                 description: Supported Base64 image data URI; maximum 7 MiB
+ *                 example: "data:image/png;base64,..."
+ *               replyTo:
+ *                 type: string
+ *                 description: Optional MongoDB ObjectId of a message in this conversation
+ *             description: Provide text, image, or both.
  *     responses:
  *       201:
  *         description: Message sent successfully
@@ -144,15 +239,19 @@ router.get("/:id", protectRoute, getMessages);
  *                   example: true
  *                 message:
  *                   $ref: '#/components/schemas/Message'
+ *       400:
+ *         description: Invalid recipient, message text, image payload, or reply target
  *       401:
  *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         description: Recipient not found
+ *       413:
+ *         description: Image exceeds the 7 MiB limit
  *       429:
  *         $ref: '#/components/responses/RateLimitExceeded'
+ *       500:
+ *         $ref: '#/components/responses/InternalError'
  */
-router.post("/read/:id", protectRoute, markMessagesRead);
-
-router.patch("/:id", protectRoute, editMessage);
-
 router.post("/send/:id", protectRoute, sendMessageRateLimiter, sendMessage);
 
 export default router;

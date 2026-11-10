@@ -182,6 +182,51 @@ export function createInternalCallEventsRouter({
     return res.status(202).json({ success: true });
   };
 
+  /**
+   * @swagger
+   * /internal/call-events:
+   *   post:
+   *     tags: [Internal]
+   *     summary: Receive an internal call event
+   *     description: Service-to-service callback authenticated with CALL_EVENTS_INTERNAL_TOKEN. Events are emitted to participant private Socket.IO rooms. Audio ringing invitations may trigger push notifications; ENDED and CANCELLED events invalidate the media session.
+   *     security:
+   *       - internalBearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [eventType, callId, conversationId, initiatorId, type, status, participantIds, createdAt]
+   *             properties:
+   *               eventType: { type: string, enum: [invitation, updated] }
+   *               callId: { type: string, format: uuid }
+   *               conversationId: { type: string, format: uuid }
+   *               initiatorId: { type: string, pattern: '^[0-9a-fA-F]{24}$' }
+   *               type: { type: string, enum: [AUDIO, VIDEO] }
+   *               status: { type: string, enum: [RINGING, ACTIVE, ENDED, CANCELLED] }
+   *               participantIds:
+   *                 type: array
+   *                 minItems: 1
+   *                 maxItems: 50
+   *                 uniqueItems: true
+   *                 description: MongoDB ObjectIds; must include initiatorId
+   *                 items: { type: string, pattern: '^[0-9a-fA-F]{24}$' }
+   *               createdAt: { type: string, format: date-time }
+   *     responses:
+   *       202:
+   *         description: Event accepted and emitted to participant rooms
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success: { type: boolean, example: true }
+   *       400: { description: Invalid event payload or malformed JSON }
+   *       401: { description: Missing or invalid internal bearer token }
+   *       413: { description: Request body exceeds the 8 KiB JSON parser limit }
+   *       503: { description: Internal call-event delivery is not configured }
+   */
   router.post("/call-events", express.json({ limit: "8kb" }), handler);
 
   return router;

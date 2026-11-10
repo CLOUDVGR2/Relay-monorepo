@@ -150,6 +150,7 @@ router.use(protectRoute);
  *                 description: Type of incident scenario
  *                 example: "api-latency-spike-v1"
  *     responses:
+ *       429: { description: Mutation rate limit exceeded or upstream rate limit reached }
  *       201:
  *         description: Incident created successfully
  *         content:
@@ -167,6 +168,12 @@ router.use(protectRoute);
  *         description: Origin not allowed
  *       503:
  *         description: Incident service unavailable
+ *       401: { description: Authentication required }
+ *       404: { description: Upstream incident resource not found }
+ *       409: { description: Conflicting incident state or rejected operation }
+ *       422: { description: Upstream validation failure }
+ *       502: { description: Incident service returned an invalid response or could not be reached }
+ *       504: { description: Incident service request timed out }
  */
 router.post(
   "/",
@@ -213,6 +220,14 @@ router.post(
  *           default: 50
  *         description: Maximum number of incidents to return
  *     responses:
+ *       400: { description: Upstream rejected the request or validation failed }
+ *       401: { description: Authentication required }
+ *       403: { description: Upstream authorization denied the request }
+ *       409: { description: Conflicting incident state or rejected operation }
+ *       422: { description: Upstream validation failure }
+ *       429: { description: Upstream incident service rate limit reached }
+ *       502: { description: Incident service returned an invalid response or could not be reached }
+ *       504: { description: Incident service request timed out }
  *       200:
  *         description: List of incidents
  *         content:
@@ -223,6 +238,7 @@ router.post(
  *                 type: object
  *       503:
  *         description: Incident service unavailable
+ *       404: { description: Upstream resource not found }
  */
 router.get("/", async (req, res) => {
   try {
@@ -252,6 +268,14 @@ router.get("/", async (req, res) => {
  *           type: string
  *         description: Incident identifier
  *     responses:
+ *       400: { description: Upstream rejected the request or validation failed }
+ *       401: { description: Authentication required }
+ *       403: { description: Upstream authorization denied the request }
+ *       409: { description: Conflicting incident state or rejected operation }
+ *       422: { description: Upstream validation failure }
+ *       429: { description: Upstream incident service rate limit reached }
+ *       502: { description: Incident service returned an invalid response or could not be reached }
+ *       504: { description: Incident service request timed out }
  *       200:
  *         description: Incident details
  *         content:
@@ -292,12 +316,20 @@ router.get("/:incidentId", async (req, res) => {
  *         schema:
  *           type: string
  *     responses:
+ *       400: { description: Upstream rejected the request or validation failed }
  *       200:
  *         description: Investigation started
  *       403:
  *         description: Origin not allowed
  *       503:
  *         description: Incident service unavailable
+ *       401: { description: Authentication required }
+ *       404: { description: Incident or upstream resource not found }
+ *       409: { description: Conflicting incident state or rejected operation }
+ *       422: { description: Upstream validation failure }
+ *       429: { description: Mutation rate limit exceeded or upstream rate limit reached }
+ *       502: { description: Incident service returned an invalid response or could not be reached }
+ *       504: { description: Incident service request timed out }
  */
 router.post(
   "/:incidentId/investigate",
@@ -334,6 +366,7 @@ router.post(
  *         schema:
  *           type: string
  *     responses:
+ *       400: { description: Upstream rejected the request or validation failed }
  *       200:
  *         description: Action approved
  *         content:
@@ -354,6 +387,12 @@ router.post(
  *         description: Invalid approval response
  *       503:
  *         description: Incident service unavailable
+ *       401: { description: Authentication required }
+ *       404: { description: Incident or upstream resource not found }
+ *       409: { description: Conflicting incident state or rejected operation }
+ *       422: { description: Upstream validation failure }
+ *       429: { description: Mutation rate limit exceeded or upstream rate limit reached }
+ *       504: { description: Incident service request timed out }
  */
 router.post(
   "/:incidentId/approve",
@@ -420,12 +459,20 @@ router.post(
  *         schema:
  *           type: string
  *     responses:
+ *       400: { description: Upstream rejected the request or validation failed }
  *       200:
  *         description: Action executed successfully
  *       403:
  *         description: Approval missing, expired, or rejected
  *       503:
  *         description: Incident service unavailable
+ *       401: { description: Authentication required }
+ *       404: { description: Incident or upstream resource not found }
+ *       409: { description: Approval rejected or incident state conflict }
+ *       422: { description: Upstream validation failure }
+ *       429: { description: Mutation rate limit exceeded or upstream rate limit reached }
+ *       502: { description: Incident service returned an invalid response or could not be reached }
+ *       504: { description: Incident service request timed out }
  */
 router.post(
   "/:incidentId/execute",
@@ -490,12 +537,20 @@ router.post(
  *         schema:
  *           type: string
  *     responses:
+ *       400: { description: Upstream rejected the request or validation failed }
  *       200:
  *         description: Recovery initiated
  *       403:
  *         description: Origin not allowed
  *       503:
  *         description: Incident service unavailable
+ *       401: { description: Authentication required }
+ *       404: { description: Incident or upstream resource not found }
+ *       409: { description: Conflicting incident state or rejected operation }
+ *       422: { description: Upstream validation failure }
+ *       429: { description: Mutation rate limit exceeded or upstream rate limit reached }
+ *       502: { description: Incident service returned an invalid response or could not be reached }
+ *       504: { description: Incident service request timed out }
  */
 router.post(
   "/:incidentId/recover",

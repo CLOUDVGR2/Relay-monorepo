@@ -6,7 +6,7 @@ const MAX_MESSAGE_BYTES = 8192;
 const MAX_STEPS = 12;
 
 const PHASES = new Set(["planning", "executing", "reviewing", "completed", "failed"]);
-const ROLES = new Set(["planner", "executor", "memory", "reviewer", "coordinator"]);
+const ROLES = new Set(["planner", "researcher", "executor", "memory", "writer", "analyst", "reviewer", "coordinator"]);
 const STATUSES = new Set(["pending", "running", "completed", "failed", "skipped"]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OBJECT_ID_RE = /^[0-9a-f]{24}$/;

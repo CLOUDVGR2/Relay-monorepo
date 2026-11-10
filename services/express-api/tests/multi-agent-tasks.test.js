@@ -131,6 +131,61 @@ describe("multi-agent task proxy handlers", () => {
     assert.equal("worker_id" in res.body, false);
   });
 
+  it("accepts the 240-second maximum and forwards it to Python", async () => {
+    setupUpstream();
+    let captured;
+    globalThis.fetch = async (url, options) => {
+      captured = { url, options };
+      return upstreamResponse(201, task);
+    };
+
+    const res = responseRecorder();
+    await handlerFor("post", "/multi-agent/tasks")(
+      {
+        user: { _id: USER_ID },
+        body: {
+          prompt: "Summarize the conversation",
+          timeout_seconds: 240,
+        },
+      },
+      res,
+    );
+
+    assert.equal(res.statusCode, 201);
+    assert.equal(
+      JSON.parse(captured.options.body).timeout_seconds,
+      240,
+    );
+  });
+
+  it("rejects timeout values above 240 without contacting Python", async () => {
+    setupUpstream();
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return upstreamResponse(201, task);
+    };
+
+    const res = responseRecorder();
+    await handlerFor("post", "/multi-agent/tasks")(
+      {
+        user: { _id: USER_ID },
+        body: {
+          prompt: "Summarize the conversation",
+          timeout_seconds: 241,
+        },
+      },
+      res,
+    );
+
+    assert.equal(res.statusCode, 400);
+    assert.deepEqual(res.body, {
+      success: false,
+      message: "Invalid multi-agent task payload",
+    });
+    assert.equal(calls, 0);
+  });
+
   it("lists tasks with pagination and forwards authenticated identity", async () => {
     setupUpstream();
     let captured;

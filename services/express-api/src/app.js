@@ -157,11 +157,11 @@ app.get("/api/health/live", (_req, res) => {
 
 /**
  * @swagger
- * /api/health/ready:
+ * /api/health/redis:
  *   get:
  *     tags: [Health]
- *     summary: Readiness probe
- *     description: Confirms that the application is ready to handle requests, including database connectivity. Used by Kubernetes readiness probes.
+ *     summary: Redis dependency health
+ *     description: Checks Redis connectivity with a bounded ping timeout.
  *     responses:
  *       200:
  *         description: Service is ready
@@ -220,6 +220,37 @@ app.get("/api/health/redis", async (_req, res) => {
   }
 });
 
+/**
+ * @swagger
+ * /api/health/ready:
+ *   get:
+ *     tags: [Health]
+ *     summary: Readiness probe
+ *     description: Confirms that the application is ready to handle requests and that MongoDB is connected.
+ *     responses:
+ *       200:
+ *         description: Application and database are ready
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ReadinessResponse'
+ *       503:
+ *         description: Application is shutting down or the database is disconnected
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   enum: [not_ready]
+ *                 reason:
+ *                   type: string
+ *                   example: shutting_down
+ *                 database:
+ *                   type: string
+ *                   enum: [disconnected]
+ */
 app.get("/api/health/ready", (_req, res) => {
   if (getIsShuttingDown()) {
     return res.status(503).json({

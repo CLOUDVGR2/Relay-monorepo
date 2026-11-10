@@ -25,54 +25,30 @@ const router = express.Router();
  * /api/auth/signup:
  *   post:
  *     tags: [Authentication]
- *     summary: Register a new user account
- *     description: Creates a new user account with email, password, and full name. Rate limited to prevent abuse.
+ *     summary: Register a browser user account
+ *     description: Creates an account and establishes a browser session using an HTTP-only JWT cookie. Returns public user fields directly.
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - email
- *               - password
- *               - fullName
+ *             required: [email, password, fullName]
  *             properties:
- *               email:
- *                 type: string
- *                 format: email
- *                 example: john@example.com
- *               password:
- *                 type: string
- *                 format: password
- *                 minLength: 6
- *                 example: SecurePass123!
- *               fullName:
- *                 type: string
- *                 minLength: 2
- *                 maxLength: 50
- *                 example: John Doe
+ *               email: { type: string, format: email, maxLength: 254 }
+ *               password: { type: string, format: password, minLength: 6, description: Maximum 72 UTF-8 bytes }
+ *               fullName: { type: string, minLength: 1, maxLength: 100 }
  *     responses:
  *       201:
- *         description: User successfully registered
+ *         description: Account created; browser JWT set as an HTTP-only cookie
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 user:
- *                   $ref: '#/components/schemas/User'
- *       400:
- *         description: Invalid input or email already exists
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       429:
- *         $ref: '#/components/responses/RateLimitExceeded'
+ *               $ref: '#/components/schemas/User'
+ *       400: { description: Missing or invalid account fields }
+ *       409: { description: Email already exists }
+ *       429: { $ref: '#/components/responses/RateLimitExceeded' }
+ *       500: { $ref: '#/components/responses/InternalError' }
  */
 router.post("/signup", signupRateLimiter, signup);
 
@@ -82,7 +58,7 @@ router.post("/signup", signupRateLimiter, signup);
  *   post:
  *     tags: [Authentication]
  *     summary: Register a native mobile account
- *     description: Uses the same validation and rate limits as browser signup and returns a bearer JWT for secure device storage.
+ *     description: Creates an account and returns public user fields plus a bearer JWT for secure device storage.
  *     requestBody:
  *       required: true
  *       content:
@@ -91,14 +67,27 @@ router.post("/signup", signupRateLimiter, signup);
  *             type: object
  *             required: [fullName, email, password]
  *             properties:
- *               fullName: { type: string, maxLength: 100 }
- *               email: { type: string, format: email }
- *               password: { type: string, format: password, minLength: 6 }
+ *               fullName: { type: string, minLength: 1, maxLength: 100 }
+ *               email: { type: string, format: email, maxLength: 254 }
+ *               password: { type: string, format: password, minLength: 6, description: Maximum 72 UTF-8 bytes }
  *     responses:
- *       201: { description: Account created; response includes public user fields, accessToken, tokenType, and expiresIn }
- *       400: { description: Invalid input }
+ *       201:
+ *         description: Account created; user fields and bearer credentials returned directly
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/User'
+ *                 - type: object
+ *                   required: [accessToken, tokenType, expiresIn]
+ *                   properties:
+ *                     accessToken: { type: string }
+ *                     tokenType: { type: string, enum: [Bearer] }
+ *                     expiresIn: { type: integer, description: Token lifetime in seconds }
+ *       400: { description: Missing or invalid account fields }
  *       409: { description: Email already exists }
- *       429: { description: Rate limit exceeded }
+ *       429: { $ref: '#/components/responses/RateLimitExceeded' }
+ *       500: { $ref: '#/components/responses/InternalError' }
  */
 router.post("/mobile/signup", signupRateLimiter, signup);
 
@@ -107,62 +96,8 @@ router.post("/mobile/signup", signupRateLimiter, signup);
  * /api/auth/login:
  *   post:
  *     tags: [Authentication]
- *     summary: Authenticate user and create session
- *     description: Authenticates a user with email and password. Sets HTTP-only JWT cookie on success. Rate limited.
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - email
- *               - password
- *             properties:
- *               email:
- *                 type: string
- *                 format: email
- *                 example: john@example.com
- *               password:
- *                 type: string
- *                 format: password
- *                 example: SecurePass123!
- *     responses:
- *       200:
- *         description: Authentication successful
- *         headers:
- *           Set-Cookie:
- *             description: HTTP-only JWT cookie
- *             schema:
- *               type: string
- *               example: jwt=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...; HttpOnly; Path=/; Max-Age=604800
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 user:
- *                   $ref: '#/components/schemas/User'
- *       401:
- *         description: Invalid credentials
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       429:
- *         $ref: '#/components/responses/RateLimitExceeded'
- */
-router.post("/login", authRateLimiter, login);
-/**
- * @swagger
- * /api/auth/mobile/login:
- *   post:
- *     tags: [Authentication]
- *     summary: Authenticate a native mobile client
- *     description: Uses the existing account verifier and returns a bearer JWT for storage in platform secure storage.
+ *     summary: Authenticate a browser user
+ *     description: Authenticates with email and password and sets an HTTP-only JWT cookie. Returns public user fields directly.
  *     requestBody:
  *       required: true
  *       content:
@@ -174,9 +109,57 @@ router.post("/login", authRateLimiter, login);
  *               email: { type: string, format: email }
  *               password: { type: string, format: password }
  *     responses:
- *       200: { description: Authenticated; response includes public user fields, accessToken, tokenType, and expiresIn }
+ *       200:
+ *         description: Authenticated; JWT set as an HTTP-only cookie
+ *         headers:
+ *           Set-Cookie:
+ *             description: Authentication cookie
+ *             schema: { type: string }
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/User'
+ *       400: { description: Email and password are required }
  *       401: { description: Invalid credentials }
- *       429: { description: Rate limit exceeded }
+ *       429: { $ref: '#/components/responses/RateLimitExceeded' }
+ *       500: { $ref: '#/components/responses/InternalError' }
+ */
+router.post("/login", authRateLimiter, login);
+/**
+ * @swagger
+ * /api/auth/mobile/login:
+ *   post:
+ *     tags: [Authentication]
+ *     summary: Authenticate a native mobile client
+ *     description: Authenticates with email and password and returns public user fields plus a bearer JWT for secure device storage.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, password]
+ *             properties:
+ *               email: { type: string, format: email }
+ *               password: { type: string, format: password }
+ *     responses:
+ *       200:
+ *         description: Authenticated; user fields and bearer credentials returned directly
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/User'
+ *                 - type: object
+ *                   required: [accessToken, tokenType, expiresIn]
+ *                   properties:
+ *                     accessToken: { type: string }
+ *                     tokenType: { type: string, enum: [Bearer] }
+ *                     expiresIn: { type: integer, description: Token lifetime in seconds }
+ *       400: { description: Email and password are required }
+ *       401: { description: Invalid credentials }
+ *       429: { $ref: '#/components/responses/RateLimitExceeded' }
+ *       500: { $ref: '#/components/responses/InternalError' }
  */
 router.post("/mobile/login", authRateLimiter, login);
 
@@ -185,22 +168,22 @@ router.post("/mobile/login", authRateLimiter, login);
  * /api/auth/logout:
  *   post:
  *     tags: [Authentication]
- *     summary: End user session
- *     description: Clears the JWT authentication cookie, logging the user out.
+ *     summary: End browser session
+ *     description: Clears the JWT authentication cookie. Authentication is not required for this route.
  *     responses:
  *       200:
- *         description: Successfully logged out
+ *         description: Session cookie cleared
+ *         headers:
+ *           Set-Cookie:
+ *             description: Expired authentication cookie
+ *             schema: { type: string }
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: "Logged out successfully"
+ *                 message: { type: string, example: Logged out successfully }
+ *       500: { $ref: '#/components/responses/InternalError' }
  */
 router.post("/logout", logout);
 
@@ -209,44 +192,37 @@ router.post("/logout", logout);
  * /api/auth/update-profile:
  *   put:
  *     tags: [Authentication]
- *     summary: Update user profile
- *     description: Updates the authenticated user's profile information. Supports text and image updates. Rate limited.
+ *     summary: Update authenticated user profile
+ *     description: Updates the user's full name and/or profile picture. Profile pictures must be supported Base64 image data URIs, not multipart files.
  *     security:
  *       - cookieAuth: []
  *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
- *         multipart/form-data:
+ *         application/json:
  *           schema:
  *             type: object
+ *             minProperties: 1
  *             properties:
- *               fullName:
- *                 type: string
- *                 minLength: 2
- *                 maxLength: 50
- *                 example: John Smith
+ *               fullName: { type: string, minLength: 1, description: Non-empty name trimmed by the server }
  *               profilePic:
  *                 type: string
- *                 format: binary
- *                 description: Profile picture image file (max 5MB)
+ *                 description: Supported Base64 image data URI; maximum decoded image size 7 MiB
+ *                 example: data:image/png;base64,iVBORw0KGgo...
  *     responses:
  *       200:
- *         description: Profile updated successfully
+ *         description: Updated public user object
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 user:
- *                   $ref: '#/components/schemas/User'
- *       401:
- *         $ref: '#/components/responses/Unauthorized'
- *       429:
- *         $ref: '#/components/responses/RateLimitExceeded'
+ *               $ref: '#/components/schemas/User'
+ *       400: { description: Invalid fields or no supported updates supplied }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ *       404: { description: User not found }
+ *       413: { description: Profile image exceeds 7 MiB }
+ *       429: { $ref: '#/components/responses/RateLimitExceeded' }
+ *       500: { $ref: '#/components/responses/InternalError' }
  */
 router.put(
   "/update-profile",
@@ -261,25 +237,18 @@ router.put(
  *   get:
  *     tags: [Authentication]
  *     summary: Verify authentication status
- *     description: Checks if the current session is authenticated and returns user data if valid.
+ *     description: Returns the authenticated user's public fields directly.
  *     security:
  *       - cookieAuth: []
  *       - bearerAuth: []
  *     responses:
  *       200:
- *         description: User is authenticated
+ *         description: Authenticated user
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 user:
- *                   $ref: '#/components/schemas/User'
- *       401:
- *         $ref: '#/components/responses/Unauthorized'
+ *               $ref: '#/components/schemas/User'
+ *       401: { $ref: '#/components/responses/Unauthorized' }
  */
 router.get("/check", protectRoute, checkAuth);
 
