@@ -101,3 +101,12 @@ apps/mobile/*.mobileprovision
 /apps/mobile/google-services.json
 /gitleaks-redacted-report.json
 /apps/mobile/audit.json
+
+# Local backup files
+*.bak
+*.bak-*
+
+# Local macOS Go build binaries
+/services/api-gateway/api-gateway
+/services/jobs-api/jobs-api
+/services/jobs-worker/jobs-worker
