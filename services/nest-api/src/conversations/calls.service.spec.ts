@@ -5,6 +5,7 @@ import {
   CallStatus,
   CallType,
 } from '../generated/prisma/enums.js';
+import { CallMediaType } from './call.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CallsService } from './calls.service.js';
 import { CallEventsPublisher } from './call-events.publisher.js';
@@ -15,7 +16,31 @@ describe('CallsService', () => {
   const actorId = '507f1f77bcf86cd799439011';
   const inviteeId = '507f191e810c19729de860ea';
 
-  const pendingCall = () => ({
+  type CallFixture = {
+    id: string;
+    conversationId: string;
+    initiatorId: string;
+    type: CallType;
+    status: CallStatus;
+    startedAt: Date | null;
+    answeredAt: Date | null;
+    endedAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+    participants: Array<{
+      id: string;
+      userId: string;
+      status: CallParticipantStatus;
+      invitedAt: Date;
+      respondedAt: Date | null;
+      joinedAt: Date | null;
+      leftAt: Date | null;
+      recordingConsent: boolean | null;
+      recordingConsentAt: Date | null;
+    }>;
+  };
+
+  const pendingCall = (): CallFixture => ({
     id: callId,
     conversationId,
     initiatorId: actorId,
@@ -35,6 +60,8 @@ describe('CallsService', () => {
         respondedAt: new Date(),
         joinedAt: new Date(),
         leftAt: null,
+        recordingConsent: false,
+        recordingConsentAt: null,
       },
       {
         id: 'participant-2',
@@ -44,6 +71,8 @@ describe('CallsService', () => {
         respondedAt: null,
         joinedAt: null,
         leftAt: null,
+        recordingConsent: false,
+        recordingConsentAt: null,
       },
     ],
   });
@@ -135,7 +164,7 @@ describe('CallsService', () => {
 
         await expect(
           service.create(
-            { conversationId, type, participantIds: [inviteeId] },
+            { conversationId, type: CallMediaType.AUDIO, participantIds: [inviteeId] },
             actorId,
           ),
         ).resolves.toEqual({ ...existing, created: false });
@@ -171,7 +200,7 @@ describe('CallsService', () => {
 
       await expect(
         service.create(
-          { conversationId, type: CallType.AUDIO, participantIds: [inviteeId] },
+          { conversationId, type: CallMediaType.AUDIO, participantIds: [inviteeId] },
           actorId,
         ),
       ).resolves.toEqual({ ...existing, created: false });
@@ -187,7 +216,7 @@ describe('CallsService', () => {
 
       await expect(
         service.create(
-          { conversationId, type: 'AUDIO', participantIds: [inviteeId] },
+          { conversationId, type: CallMediaType.AUDIO, participantIds: [inviteeId] },
           actorId,
         ),
       ).resolves.toEqual({ ...created, created: true });
@@ -203,7 +232,7 @@ describe('CallsService', () => {
 
       await expect(
         service.create(
-          { conversationId, type: 'AUDIO', participantIds: [inviteeId] },
+          { conversationId, type: CallMediaType.AUDIO, participantIds: [inviteeId] },
           actorId,
         ),
       ).resolves.toEqual({ ...created, created: true });
@@ -217,7 +246,7 @@ describe('CallsService', () => {
         service.create(
           {
             conversationId,
-            type: 'AUDIO',
+            type: CallMediaType.AUDIO,
             participantIds: [inviteeId.toUpperCase()],
           },
           actorId.toUpperCase(),
@@ -274,7 +303,7 @@ describe('CallsService', () => {
       prisma.conversation.findFirst.mockResolvedValue(null);
 
       await expect(
-        service.create({ conversationId, type: 'AUDIO' }, actorId),
+        service.create({ conversationId, type: CallMediaType.AUDIO }, actorId),
       ).rejects.toThrow(NotFoundException);
 
       expect(prisma.callSession.create).not.toHaveBeenCalled();
@@ -285,7 +314,7 @@ describe('CallsService', () => {
         service.create(
           {
             conversationId,
-            type: 'AUDIO',
+            type: CallMediaType.AUDIO,
             participantIds: ['507f1f77bcf86cd799439012'],
           },
           actorId,
@@ -302,7 +331,7 @@ describe('CallsService', () => {
       });
 
       await expect(
-        service.create({ conversationId, type: 'AUDIO' }, actorId),
+        service.create({ conversationId, type: CallMediaType.AUDIO }, actorId),
       ).rejects.toThrow(BadRequestException);
 
       expect(prisma.callSession.create).not.toHaveBeenCalled();

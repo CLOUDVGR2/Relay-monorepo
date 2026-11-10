@@ -13,17 +13,43 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'node:crypto';
 import { IsString, IsUUID, Matches } from 'class-validator';
+import {
+  ApiBadRequestResponse,
+  ApiBearerAuth,
+  ApiCreatedResponse,
+  ApiInternalServerErrorResponse,
+  ApiNotFoundResponse,
+  ApiOperation,
+  ApiServiceUnavailableResponse,
+  ApiTags,
+  ApiUnauthorizedResponse,
+  ApiProperty,
+} from '@nestjs/swagger';
+import { ApiErrorResponseDto } from '../common/dto/api-error-response.dto.js';
+import { AuthorizeMediaSessionResponseDto } from './dto/call-recording-response.dto.js';
 import { CallsService } from './calls.service.js';
 
 class AuthorizeMediaSessionDto {
+  @ApiProperty({
+    description: 'UUID of the active call session.',
+    format: 'uuid',
+    example: '8dd36e71-3c3e-44b8-8469-617c27990d78',
+  })
   @IsUUID()
   callId!: string;
 
+  @ApiProperty({
+    description: '24-character hexadecimal identifier of the requesting participant.',
+    example: '507f1f77bcf86cd799439011',
+    pattern: '^[a-fA-F0-9]{24}$',
+  })
   @IsString()
   @Matches(/^[a-fA-F0-9]{24}$/)
   actorId!: string;
 }
 
+@ApiTags('Internal media sessions')
+@ApiBearerAuth('internalBearer')
 @Controller('internal/media-sessions')
 export class InternalMediaSessionsController {
   constructor(
@@ -32,6 +58,35 @@ export class InternalMediaSessionsController {
   ) {}
 
   @Post('authorize')
+  @ApiOperation({
+    summary: 'Authorize an active internal media session',
+    description:
+      'Trusted server-to-server endpoint. Requires the internal bearer token; never call directly from browser or mobile clients.',
+  })
+  @ApiCreatedResponse({
+    description: 'The peer identity and recording-consent authorization.',
+    type: AuthorizeMediaSessionResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'The call ID or participant ID is invalid.',
+    type: ApiErrorResponseDto,
+  })
+  @ApiUnauthorizedResponse({
+    description: 'The internal bearer token is missing or invalid.',
+    type: ApiErrorResponseDto,
+  })
+  @ApiNotFoundResponse({
+    description: 'No eligible active media session was found.',
+    type: ApiErrorResponseDto,
+  })
+  @ApiServiceUnavailableResponse({
+    description: 'Internal authorization is not configured.',
+    type: ApiErrorResponseDto,
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'An unexpected server error occurred.',
+    type: ApiErrorResponseDto,
+  })
   async authorize(
     @Headers('authorization') authorization: string | undefined,
     @Body() input: AuthorizeMediaSessionDto,

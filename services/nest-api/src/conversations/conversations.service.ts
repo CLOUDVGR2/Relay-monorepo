@@ -323,36 +323,6 @@ export class ConversationsService {
     });
   }
 
-  // Load a bounded conversation history for AI analysis after verifying membership.
-  async findMessagesForSummary(
-    conversationId: string,
-    userId: string,
-    limit = 100,
-  ) {
-    const conversation = await this.prisma.conversation.findFirst({
-      where: {
-        id: conversationId,
-        participants: {
-          some: { userId: userId.toLowerCase() },
-        },
-      },
-      select: { id: true },
-    });
-
-    if (!conversation) {
-      throw new NotFoundException('Conversation not found');
-    }
-
-    const pageSize = Math.min(Math.max(Math.floor(limit) || 1, 1), 100);
-    const messages = await this.prisma.chatMessage.findMany({
-      where: { conversationId },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: pageSize,
-    });
-
-    return messages.reverse();
-  }
-
   // Load one page of messages after confirming conversation membership.
   async findMessages(
     conversationId: string,

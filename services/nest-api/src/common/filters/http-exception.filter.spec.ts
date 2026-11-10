@@ -3,6 +3,7 @@
 import {
   ArgumentsHost,
   BadRequestException,
+  HttpException,
   HttpStatus,
   NotFoundException,
 } from '@nestjs/common';
@@ -97,6 +98,22 @@ describe('HttpExceptionFilter', () => {
         statusCode: 400,
         message: ['email must be valid', 'password is too short'],
         error: 'Bad Request',
+      }),
+    );
+  });
+
+  it('should use the exception name for a plain-string response', () => {
+    filter.catch(
+      new HttpException('Invalid request', HttpStatus.BAD_REQUEST),
+      createHost(),
+    );
+
+    expect(response.status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
+    expect(response.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        statusCode: 400,
+        message: 'Invalid request',
+        error: 'HttpException',
       }),
     );
   });

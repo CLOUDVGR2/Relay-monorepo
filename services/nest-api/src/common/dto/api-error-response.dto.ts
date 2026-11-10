@@ -19,6 +19,7 @@ export class ApiErrorResponseDto {
   /** UTC timestamp indicating when the error response was generated. */
   @ApiProperty({
     description: 'ISO 8601 timestamp in UTC.',
+    format: 'date-time',
     example: '2026-10-12T21:19:34.000Z',
   })
   timestamp!: string;

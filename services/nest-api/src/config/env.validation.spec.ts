@@ -12,8 +12,7 @@ const validStorageConfig = {
 };
 
 const validConfig = {
-  DATABASE_URL:
-    'postgresql://user:password@localhost:5432/chatapp',
+  DATABASE_URL: 'postgresql://user:password@localhost:5432/chatapp',
   MONGODB_URI: 'mongodb://localhost:27017/chatapp',
   JWT_SECRET: 'test-only-secret-with-at-least-32-characters',
 };
@@ -31,6 +30,7 @@ describe('validateEnvironment', () => {
     const result = validateEnvironment({
       ...validConfig,
       ...validStorageConfig,
+      CALL_RECORDING_STORAGE_PUBLIC_ENDPOINT: 'https://storage.example.com',
       PORT: '8080',
       NODE_ENV: 'production',
       CLIENT_URL: 'https://example.com',
@@ -72,9 +72,7 @@ describe('validateEnvironment', () => {
   });
 
   it('should reject a port below the valid range', () => {
-    expect(() =>
-      validateEnvironment({ ...validConfig, PORT: '0' }),
-    ).toThrow(
+    expect(() => validateEnvironment({ ...validConfig, PORT: '0' })).toThrow(
       'PORT must be an integer between 1 and 65535.',
     );
   });
@@ -82,9 +80,7 @@ describe('validateEnvironment', () => {
   it('should reject a port above the valid range', () => {
     expect(() =>
       validateEnvironment({ ...validConfig, PORT: '65536' }),
-    ).toThrow(
-      'PORT must be an integer between 1 and 65535.',
-    );
+    ).toThrow('PORT must be an integer between 1 and 65535.');
   });
 
   it('should reject a non-numeric port', () => {
@@ -93,9 +89,7 @@ describe('validateEnvironment', () => {
         ...validConfig,
         PORT: 'not-a-port',
       }),
-    ).toThrow(
-      'PORT must be an integer between 1 and 65535.',
-    );
+    ).toThrow('PORT must be an integer between 1 and 65535.');
   });
 
   it('should reject an unsupported NODE_ENV', () => {
@@ -104,9 +98,7 @@ describe('validateEnvironment', () => {
         ...validConfig,
         NODE_ENV: 'staging',
       }),
-    ).toThrow(
-      'NODE_ENV must be development, test, or production.',
-    );
+    ).toThrow('NODE_ENV must be development, test, or production.');
   });
 
   it('should require DATABASE_URL', () => {
@@ -120,8 +112,7 @@ describe('validateEnvironment', () => {
   it('should accept a PostgreSQL URL using the postgres scheme', () => {
     const result = validateEnvironment({
       ...validConfig,
-      DATABASE_URL:
-        'postgres://user:password@localhost:5432/chatapp',
+      DATABASE_URL: 'postgres://user:password@localhost:5432/chatapp',
     });
 
     expect(result['DATABASE_URL']).toBe(
@@ -135,9 +126,7 @@ describe('validateEnvironment', () => {
         ...validConfig,
         DATABASE_URL: 'https://example.com/chatapp',
       }),
-    ).toThrow(
-      'DATABASE_URL must use the postgresql:// or postgres:// scheme.',
-    );
+    ).toThrow('DATABASE_URL must use the postgresql:// or postgres:// scheme.');
   });
 
   it('should reject a malformed PostgreSQL URL', () => {
@@ -146,21 +135,16 @@ describe('validateEnvironment', () => {
         ...validConfig,
         DATABASE_URL: 'not-a-database-uri',
       }),
-    ).toThrow(
-      'DATABASE_URL must be a valid PostgreSQL connection URL.',
-    );
+    ).toThrow('DATABASE_URL must be a valid PostgreSQL connection URL.');
   });
 
   it('should reject a PostgreSQL URL without a database name', () => {
     expect(() =>
       validateEnvironment({
         ...validConfig,
-        DATABASE_URL:
-          'postgresql://user:password@localhost:5432',
+        DATABASE_URL: 'postgresql://user:password@localhost:5432',
       }),
-    ).toThrow(
-      'DATABASE_URL must include a hostname and database name.',
-    );
+    ).toThrow('DATABASE_URL must include a hostname and database name.');
   });
 
   it('should require MONGODB_URI', () => {
@@ -174,8 +158,7 @@ describe('validateEnvironment', () => {
   it('should accept a MongoDB SRV URL', () => {
     const result = validateEnvironment({
       ...validConfig,
-      MONGODB_URI:
-        'mongodb+srv://user:password@example.mongodb.net/chatapp',
+      MONGODB_URI: 'mongodb+srv://user:password@example.mongodb.net/chatapp',
     });
 
     expect(result['MONGODB_URI']).toBe(
@@ -189,9 +172,7 @@ describe('validateEnvironment', () => {
         ...validConfig,
         MONGODB_URI: 'https://example.com/chatapp',
       }),
-    ).toThrow(
-      'MONGODB_URI must use the mongodb:// or mongodb+srv:// scheme.',
-    );
+    ).toThrow('MONGODB_URI must use the mongodb:// or mongodb+srv:// scheme.');
   });
 
   it('should reject a MongoDB URL without a hostname', () => {
@@ -200,9 +181,7 @@ describe('validateEnvironment', () => {
         ...validConfig,
         MONGODB_URI: 'mongodb:///chatapp',
       }),
-    ).toThrow(
-      'MONGODB_URI must include a hostname.',
-    );
+    ).toThrow('MONGODB_URI must include a hostname.');
   });
 
   it('should require JWT_SECRET', () => {
@@ -219,9 +198,7 @@ describe('validateEnvironment', () => {
         ...validConfig,
         JWT_SECRET: 'too-short',
       }),
-    ).toThrow(
-      'JWT_SECRET must be at least 32 characters long.',
-    );
+    ).toThrow('JWT_SECRET must be at least 32 characters long.');
   });
 
   it('should accept a JWT secret of at least 32 characters', () => {
@@ -238,7 +215,9 @@ describe('validateEnvironment', () => {
         CLIENT_URL: 'https://example.com',
         REDIS_URL: 'redis://redis.example.com:6379',
       }),
-    ).toThrow('Call-recording storage bucket, region, access key, and secret key must be configured in production.');
+    ).toThrow(
+      'Call-recording storage bucket, region, access key, and secret key must be configured in production.',
+    );
   });
 
   it('accepts complete private call-recording storage settings', () => {
@@ -256,7 +235,9 @@ describe('validateEnvironment', () => {
         ...validConfig,
         CALL_RECORDING_STORAGE_BUCKET: 'relay-call-recordings',
       }),
-    ).toThrow('Call-recording storage bucket, region, access key, and secret key must be configured together.');
+    ).toThrow(
+      'Call-recording storage bucket, region, access key, and secret key must be configured together.',
+    );
   });
 
   it('rejects a storage endpoint containing a path', () => {
@@ -266,7 +247,36 @@ describe('validateEnvironment', () => {
         ...validStorageConfig,
         CALL_RECORDING_STORAGE_ENDPOINT: 'http://minio:9000/private',
       }),
-    ).toThrow('CALL_RECORDING_STORAGE_ENDPOINT must be a valid HTTP(S) origin without credentials, path, query, or fragment.');
+    ).toThrow(
+      'CALL_RECORDING_STORAGE_ENDPOINT must be a valid HTTP(S) origin without credentials, path, query, or fragment.',
+    );
+  });
+
+  it('rejects a public storage endpoint containing a path', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validConfig,
+        ...validStorageConfig,
+        CALL_RECORDING_STORAGE_PUBLIC_ENDPOINT:
+          'https://storage.example.com/private',
+      }),
+    ).toThrow(
+      'CALL_RECORDING_STORAGE_PUBLIC_ENDPOINT must be a valid HTTP(S) origin without credentials, path, query, or fragment.',
+    );
+  });
+
+  it('requires a public storage endpoint in production', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validConfig,
+        NODE_ENV: 'production',
+        CLIENT_URL: 'https://example.com',
+        REDIS_URL: 'redis://redis.example.com:6379',
+        ...validStorageConfig,
+      }),
+    ).toThrow(
+      'CALL_RECORDING_STORAGE_PUBLIC_ENDPOINT must be configured in production.',
+    );
   });
 
   it('rejects an invalid path-style setting', () => {
@@ -326,5 +336,4 @@ describe('validateEnvironment', () => {
 
     expect(result['CALL_EVENTS_BASE_URL']).toBe('http://express-api:5001');
   });
-
 });

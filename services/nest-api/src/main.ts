@@ -3,11 +3,11 @@
 import cookieParser from 'cookie-parser';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 
 import { AppModule } from './app.module.js';
 import { configureApp } from './configure-app.js';
+import { setupSwagger } from './openapi/setup-swagger.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 import { RequestContextMiddleware } from './common/middleware/request-context.middleware.js';
 import { RequestTimingInterceptor } from './common/interceptors/request-timing.interceptor.js';
@@ -56,45 +56,7 @@ async function bootstrap(): Promise<void> {
   app.useGlobalFilters(new HttpExceptionFilter());
   configureApp(app);
 
-  // Setup Swagger/OpenAPI documentation
-  const config = new DocumentBuilder()
-    .setTitle('Relay NestJS API')
-    .setDescription(`
-      Production-grade GraphQL API for conversations and job management.
-
-      ## Authentication
-      Most endpoints require authentication via HTTP-only JWT cookie.
-      Include the cookie in requests: \`jwt=<token>\`
-
-      ## GraphQL
-      The primary API is GraphQL at \`/graphql\`. Use the built-in GraphiQL IDE for testing.
-
-      ## REST Endpoints
-      - \`/health\` - Health check
-      - \`/docs\` - API documentation (this page)
-    `)
-    .setVersion('1.0')
-    .addCookieAuth('jwt', {
-      type: 'apiKey',
-      in: 'cookie',
-      name: 'jwt',
-      description: 'JWT authentication token (HTTP-only cookie)',
-    })
-    .addServer('http://localhost:3000', 'Development')
-    .addServer('https://api.relay.chat', 'Production')
-    .build();
-
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('docs', app, document, {
-    customSiteTitle: 'Relay NestJS API Documentation',
-    customCss: '.swagger-ui .topbar { display: none }',
-    swaggerOptions: {
-      persistAuthorization: true,
-      docExpansion: 'none',
-      filter: true,
-      showRequestDuration: true,
-    },
-  });
+  setupSwagger(app);
 
   const port = configService.get<number>('PORT', 3000);
 

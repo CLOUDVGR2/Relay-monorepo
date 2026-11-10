@@ -308,58 +308,6 @@ describe('ConversationsService', () => {
     });
   });
 
-  describe('findMessagesForSummary', () => {
-    it('checks membership and returns a bounded history chronologically', async () => {
-      const newestFirst = [
-        { id: 'message-2', text: 'Second' },
-        { id: 'message-1', text: 'First' },
-      ];
-      prisma.conversation.findFirst.mockResolvedValue({ id: 'conversation-1' });
-      prisma.chatMessage.findMany.mockResolvedValue(newestFirst);
-
-      await expect(
-        service.findMessagesForSummary('conversation-1', userId, 2),
-      ).resolves.toEqual([
-        { id: 'message-1', text: 'First' },
-        { id: 'message-2', text: 'Second' },
-      ]);
-
-      expect(prisma.conversation.findFirst).toHaveBeenCalledWith({
-        where: {
-          id: 'conversation-1',
-          participants: { some: { userId: 'user-1' } },
-        },
-        select: { id: true },
-      });
-      expect(prisma.chatMessage.findMany).toHaveBeenCalledWith({
-        where: { conversationId: 'conversation-1' },
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: 2,
-      });
-    });
-
-    it('caps the history at 100 messages', async () => {
-      prisma.conversation.findFirst.mockResolvedValue({ id: 'conversation-1' });
-      prisma.chatMessage.findMany.mockResolvedValue([]);
-
-      await service.findMessagesForSummary('conversation-1', userId, 500);
-
-      expect(prisma.chatMessage.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ take: 100 }),
-      );
-    });
-
-    it('does not load messages for a non-participant', async () => {
-      prisma.conversation.findFirst.mockResolvedValue(null);
-
-      await expect(
-        service.findMessagesForSummary('conversation-1', userId),
-      ).rejects.toThrow(NotFoundException);
-
-      expect(prisma.chatMessage.findMany).not.toHaveBeenCalled();
-    });
-  });
-
   // Test retrieving messages from a conversation in pages.
   describe('findMessages', () => {
     const conversationId = 'conversation-1';

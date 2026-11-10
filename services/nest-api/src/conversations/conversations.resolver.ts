@@ -7,7 +7,6 @@ import {
   type AuthenticatedRequest,
 } from '../auth/gql-auth.guard.js';
 import { ConversationsService } from './conversations.service.js';
-import { AIService } from '../ai/ai.service.js';
 import {
   AddConversationParticipantsInput,
   ChatMessageType,
@@ -18,8 +17,6 @@ import {
   CreateMessageInput,
   PaginatedMessagesType,
   UpdateConversationDetailsInput,
-  ConversationAnalysisType,
-  SummarizeConversationInput,
 } from './conversation.types.js';
 
 // Expose conversation operations through GraphQL.
@@ -29,7 +26,6 @@ import {
 export class ConversationsResolver {
   constructor(
     private readonly conversationsService: ConversationsService,
-    private readonly aiService: AIService,
   ) {}
 
   // Load message history only when the GraphQL selection requests this field.
@@ -65,26 +61,6 @@ export class ConversationsResolver {
     );
   }
 
-
-  // Analyze only server-retrieved messages after the service verifies membership.
-  @Query(() => ConversationAnalysisType, { name: 'summarizeConversation' })
-  async summarizeConversation(
-    @Args('input') input: SummarizeConversationInput,
-    @Context('req') request: AuthenticatedRequest,
-  ): Promise<ConversationAnalysisType> {
-    // Never accept a transcript or speaker identity from client-controlled input.
-    const messages = await this.conversationsService.findMessagesForSummary(
-      input.conversationId,
-      request.user!.id,
-    );
-
-    return this.aiService.analyzeConversation(
-      messages.map((message) => ({
-        sender: message.senderId,
-        text: message.text,
-      })),
-    );
-  }
 
   // Create a conversation with the authenticated account and requested participants.
   @Mutation(() => ConversationType, { name: 'createConversation' })

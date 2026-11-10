@@ -2,6 +2,7 @@
 
 import {
   BadGatewayException,
+  BadRequestException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -37,7 +38,7 @@ export class JobsService {
       !normalizedMessage ||
       Buffer.byteLength(normalizedMessage, 'utf8') > 10000
     ) {
-      throw new BadGatewayException('The job message is invalid.');
+      throw new BadRequestException('The job message is invalid.');
     }
 
     const payload = await this.requestGoApi('/internal/v1/jobs', {
@@ -69,7 +70,7 @@ export class JobsService {
     limit = 50,
   ): Promise<{ jobs: JobStatus[] }> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
-      throw new BadGatewayException('Job history limit must be between 1 and 100.');
+      throw new BadRequestException('Job history limit must be between 1 and 100.');
     }
 
     const query = new URLSearchParams({

@@ -1,7 +1,8 @@
 /** Request controllers for app controller in the Relay NestJS API. */
 
 import { Controller, Get } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiInternalServerErrorResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiErrorResponseDto } from './common/dto/api-error-response.dto.js';
 
 /**
  * Root application controller
@@ -16,7 +17,14 @@ export class AppController {
    */
   @Get()
   @ApiOperation({ summary: 'Root endpoint', description: 'Returns a simple greeting message' })
-  @ApiResponse({ status: 200, description: 'Greeting message' })
+  @ApiOkResponse({
+    description: 'Greeting message.',
+    schema: { type: 'string', example: 'Hello World!' },
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'An unexpected server error occurred.',
+    type: ApiErrorResponseDto,
+  })
   getHello(): string {
     return 'Hello World!';
   }

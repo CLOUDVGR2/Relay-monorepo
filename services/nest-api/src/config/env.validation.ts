@@ -10,21 +10,12 @@ export function validateEnvironment(
   const rawPort = config['PORT'] ?? '3000';
   const port = Number(rawPort);
 
-  if (
-    typeof rawPort !== 'string' &&
-    typeof rawPort !== 'number'
-  ) {
+  if (typeof rawPort !== 'string' && typeof rawPort !== 'number') {
     throw new Error('PORT must be a valid integer.');
   }
 
-  if (
-    !Number.isInteger(port) ||
-    port < 1 ||
-    port > 65535
-  ) {
-    throw new Error(
-      'PORT must be an integer between 1 and 65535.',
-    );
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('PORT must be an integer between 1 and 65535.');
   }
 
   const nodeEnv = config['NODE_ENV'] ?? 'development';
@@ -34,9 +25,7 @@ export function validateEnvironment(
     nodeEnv !== 'test' &&
     nodeEnv !== 'production'
   ) {
-    throw new Error(
-      'NODE_ENV must be development, test, or production.',
-    );
+    throw new Error('NODE_ENV must be development, test, or production.');
   }
 
   const rawRedisUrl = config['REDIS_URL'];
@@ -77,8 +66,10 @@ export function validateEnvironment(
   // Require an explicit frontend origin in production deployments.
   const clientUrl = config['CLIENT_URL'];
 
-  if (nodeEnv === 'production' &&
-      (typeof clientUrl !== 'string' || !clientUrl.trim())) {
+  if (
+    nodeEnv === 'production' &&
+    (typeof clientUrl !== 'string' || !clientUrl.trim())
+  ) {
     throw new Error('CLIENT_URL must be configured in production.');
   }
 
@@ -99,7 +90,9 @@ export function validateEnvironment(
           throw new Error();
         }
       } catch {
-        throw new Error('CLIENT_URL must contain valid comma-separated origins.');
+        throw new Error(
+          'CLIENT_URL must contain valid comma-separated origins.',
+        );
       }
     }
   }
@@ -114,9 +107,7 @@ export function validateEnvironment(
   try {
     parsedDatabaseUrl = new URL(databaseUrl);
   } catch {
-    throw new Error(
-      'DATABASE_URL must be a valid PostgreSQL connection URL.',
-    );
+    throw new Error('DATABASE_URL must be a valid PostgreSQL connection URL.');
   }
 
   if (
@@ -128,28 +119,18 @@ export function validateEnvironment(
     );
   }
 
-  if (
-    !parsedDatabaseUrl.hostname ||
-    !parsedDatabaseUrl.pathname.slice(1)
-  ) {
-    throw new Error(
-      'DATABASE_URL must include a hostname and database name.',
-    );
+  if (!parsedDatabaseUrl.hostname || !parsedDatabaseUrl.pathname.slice(1)) {
+    throw new Error('DATABASE_URL must include a hostname and database name.');
   }
 
-  const mongoUri = requireNonEmptyString(
-    config['MONGODB_URI'],
-    'MONGODB_URI',
-  );
+  const mongoUri = requireNonEmptyString(config['MONGODB_URI'], 'MONGODB_URI');
 
   let parsedMongoUri: URL;
 
   try {
     parsedMongoUri = new URL(mongoUri);
   } catch {
-    throw new Error(
-      'MONGODB_URI must be a valid MongoDB connection URL.',
-    );
+    throw new Error('MONGODB_URI must be a valid MongoDB connection URL.');
   }
 
   if (
@@ -162,20 +143,13 @@ export function validateEnvironment(
   }
 
   if (!parsedMongoUri.hostname) {
-    throw new Error(
-      'MONGODB_URI must include a hostname.',
-    );
+    throw new Error('MONGODB_URI must include a hostname.');
   }
 
-  const jwtSecret = requireNonEmptyString(
-    config['JWT_SECRET'],
-    'JWT_SECRET',
-  );
+  const jwtSecret = requireNonEmptyString(config['JWT_SECRET'], 'JWT_SECRET');
 
   if (jwtSecret.length < 32) {
-    throw new Error(
-      'JWT_SECRET must be at least 32 characters long.',
-    );
+    throw new Error('JWT_SECRET must be at least 32 characters long.');
   }
 
   // Validate the optional Go job-service integration.
@@ -254,19 +228,13 @@ export function validateEnvironment(
   const callEventsToken = config['CALL_EVENTS_INTERNAL_TOKEN'];
 
   if (callEventsBaseUrl !== undefined || callEventsToken !== undefined) {
-    if (
-      typeof callEventsBaseUrl !== 'string' ||
-      !callEventsBaseUrl.trim()
-    ) {
+    if (typeof callEventsBaseUrl !== 'string' || !callEventsBaseUrl.trim()) {
       throw new Error(
         'CALL_EVENTS_BASE_URL is required when configuring call-event integration.',
       );
     }
 
-    requireNonEmptyString(
-      callEventsToken,
-      'CALL_EVENTS_INTERNAL_TOKEN',
-    );
+    requireNonEmptyString(callEventsToken, 'CALL_EVENTS_INTERNAL_TOKEN');
 
     try {
       const parsedCallEventsUrl = new URL(callEventsBaseUrl);
@@ -297,16 +265,23 @@ export function validateEnvironment(
     'CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY',
   ] as const;
   const configuredStorageKeys = storageKeys.filter(
-    (key) => config[key] !== undefined && config[key] !== null && config[key] !== '',
+    (key) =>
+      config[key] !== undefined && config[key] !== null && config[key] !== '',
   );
 
-  if (nodeEnv === 'production' && configuredStorageKeys.length !== storageKeys.length) {
+  if (
+    nodeEnv === 'production' &&
+    configuredStorageKeys.length !== storageKeys.length
+  ) {
     throw new Error(
       'Call-recording storage bucket, region, access key, and secret key must be configured in production.',
     );
   }
 
-  if (configuredStorageKeys.length > 0 && configuredStorageKeys.length !== storageKeys.length) {
+  if (
+    configuredStorageKeys.length > 0 &&
+    configuredStorageKeys.length !== storageKeys.length
+  ) {
     throw new Error(
       'Call-recording storage bucket, region, access key, and secret key must be configured together.',
     );
@@ -317,9 +292,15 @@ export function validateEnvironment(
   }
 
   const storageEndpoint = config['CALL_RECORDING_STORAGE_ENDPOINT'];
-  if (storageEndpoint !== undefined && storageEndpoint !== null && storageEndpoint !== '') {
+  if (
+    storageEndpoint !== undefined &&
+    storageEndpoint !== null &&
+    storageEndpoint !== ''
+  ) {
     if (typeof storageEndpoint !== 'string' || !storageEndpoint.trim()) {
-      throw new Error('CALL_RECORDING_STORAGE_ENDPOINT must be a valid HTTP(S) origin.');
+      throw new Error(
+        'CALL_RECORDING_STORAGE_ENDPOINT must be a valid HTTP(S) origin.',
+      );
     }
 
     try {
@@ -342,11 +323,65 @@ export function validateEnvironment(
     }
   }
 
+  const publicStorageEndpoint =
+    config['CALL_RECORDING_STORAGE_PUBLIC_ENDPOINT'];
+
+  if (
+    publicStorageEndpoint !== undefined &&
+    publicStorageEndpoint !== null &&
+    publicStorageEndpoint !== ''
+  ) {
+    if (
+      typeof publicStorageEndpoint !== 'string' ||
+      !publicStorageEndpoint.trim()
+    ) {
+      throw new Error(
+        'CALL_RECORDING_STORAGE_PUBLIC_ENDPOINT must be a valid HTTP(S) origin.',
+      );
+    }
+
+    try {
+      const parsedPublicStorageEndpoint = new URL(publicStorageEndpoint);
+
+      if (
+        !['http:', 'https:'].includes(parsedPublicStorageEndpoint.protocol) ||
+        !parsedPublicStorageEndpoint.hostname ||
+        parsedPublicStorageEndpoint.username ||
+        parsedPublicStorageEndpoint.password ||
+        parsedPublicStorageEndpoint.search ||
+        parsedPublicStorageEndpoint.hash ||
+        parsedPublicStorageEndpoint.pathname !== '/'
+      ) {
+        throw new Error();
+      }
+    } catch {
+      throw new Error(
+        'CALL_RECORDING_STORAGE_PUBLIC_ENDPOINT must be a valid HTTP(S) origin without credentials, path, query, or fragment.',
+      );
+    }
+  }
+
+  if (
+    nodeEnv === 'production' &&
+    configuredStorageKeys.length === storageKeys.length &&
+    !publicStorageEndpoint
+  ) {
+    throw new Error(
+      'CALL_RECORDING_STORAGE_PUBLIC_ENDPOINT must be configured in production.',
+    );
+  }
+
   const rawForcePathStyle = config['CALL_RECORDING_STORAGE_FORCE_PATH_STYLE'];
   let forcePathStyle = false;
-  if (rawForcePathStyle !== undefined && rawForcePathStyle !== null && rawForcePathStyle !== '') {
+  if (
+    rawForcePathStyle !== undefined &&
+    rawForcePathStyle !== null &&
+    rawForcePathStyle !== ''
+  ) {
     if (rawForcePathStyle !== 'true' && rawForcePathStyle !== 'false') {
-      throw new Error('CALL_RECORDING_STORAGE_FORCE_PATH_STYLE must be true or false.');
+      throw new Error(
+        'CALL_RECORDING_STORAGE_FORCE_PATH_STYLE must be true or false.',
+      );
     }
     forcePathStyle = rawForcePathStyle === 'true';
   }
@@ -360,10 +395,7 @@ export function validateEnvironment(
   };
 }
 
-function requireNonEmptyString(
-  value: unknown,
-  name: string,
-): string {
+function requireNonEmptyString(value: unknown, name: string): string {
   if (typeof value !== 'string' || !value.trim()) {
     throw new Error(`${name} is required and must be a non-empty string.`);
   }

@@ -87,6 +87,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       if (typeof exceptionResponse === 'string') {
         // Some NestJS exceptions use a plain string response.
         message = exceptionResponse;
+        error = exception.name;
       } else if (isRecord(exceptionResponse)) {
         // Treat every property as unknown until its type is verified.
         const responseMessage = exceptionResponse['message'];

@@ -23,7 +23,7 @@ describe('HealthController', () => {
     mockConnection = {
       db: {
         admin: () => ({
-          ping: mockPing,
+          ping: mockPing as () => Promise<{ ok: number }>,
         }),
       },
     };

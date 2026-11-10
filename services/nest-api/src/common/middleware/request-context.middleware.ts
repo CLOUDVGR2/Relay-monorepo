@@ -27,6 +27,28 @@ export class RequestContextMiddleware implements NestMiddleware {
     request.requestId = requestId;
     response.setHeader('X-Request-Id', requestId);
 
+    if (
+      request.method === 'POST' &&
+      /^\/calls\/recording-uploads\/[^/]+\/complete$/.test(request.path)
+    ) {
+      const body = request.body as Record<string, unknown> | undefined;
+      const isObject = typeof body === 'object' && body !== null;
+
+      this.logger.log(
+        JSON.stringify({
+          event: 'recording_upload_request_body',
+          requestId,
+          isObject,
+          keys: isObject ? Object.keys(body) : [],
+          sampleCountType: typeof body?.sampleCount,
+          byteSizeType: typeof body?.byteSize,
+          sha256Type: typeof body?.sha256,
+          sha256Length:
+            typeof body?.sha256 === 'string' ? body.sha256.length : null,
+        }),
+      );
+    }
+
     const startedAt = Date.now();
 
     response.on('finish', () => {

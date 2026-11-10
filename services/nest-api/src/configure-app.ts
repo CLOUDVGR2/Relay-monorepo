@@ -5,10 +5,6 @@ import {
   INestApplication,
   ValidationPipe,
 } from '@nestjs/common';
-import {
-  DocumentBuilder,
-  SwaggerModule,
-} from '@nestjs/swagger';
 
 /**
  * Applies shared HTTP application configuration.
@@ -37,6 +33,32 @@ export function configureApp(app: INestApplication): void {
 
       // Return actionable constraint messages without exposing internal details.
       exceptionFactory: (errors) => {
+        const recordingErrors = errors.filter((error) =>
+          ['sampleCount', 'byteSize', 'sha256'].includes(error.property),
+        );
+
+        if (recordingErrors.length > 0) {
+          console.warn(
+            '[Recording upload] Validation boundary diagnostic',
+            JSON.stringify(
+              recordingErrors.map((error) => ({
+                property: error.property,
+                valueType: typeof error.value,
+                value:
+                  error.property === 'sha256'
+                    ? undefined
+                    : error.value,
+                sha256Length:
+                  error.property === 'sha256' &&
+                  typeof error.value === 'string'
+                    ? error.value.length
+                    : undefined,
+                constraints: error.constraints,
+              })),
+            ),
+          );
+        }
+
         const messages = errors.flatMap((error) =>
           Object.values(error.constraints ?? {}),
         );
@@ -47,21 +69,4 @@ export function configureApp(app: INestApplication): void {
       },
     }),
   );
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Fullstack Chat API')
-    .setDescription(
-      'API documentation for the Fullstack Chat application.',
-    )
-    .setVersion('1.0.0')
-    .addCookieAuth('jwt', { type: 'apiKey', in: 'cookie' }, 'jwt')
-    .build();
-
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-
-  SwaggerModule.setup('docs', app, document, {
-    jsonDocumentUrl: 'docs/openapi.json',
-    swaggerOptions: {
-      persistAuthorization: false,
-    },
-  });
 }

@@ -42,7 +42,7 @@ describe('GqlAuthGuard', () => {
     await expect(activateWithRequest(req)).resolves.toBe(true);
     expect(verifyToken).toHaveBeenCalledWith('mobile-token');
     expect(exists).toHaveBeenCalledWith(userId);
-    expect(req.user).toEqual({ id: userId });
+    expect((req as Request & { user?: { id: string } }).user).toEqual({ id: userId });
   });
 
   it('continues to authenticate with the existing JWT cookie', async () => {
@@ -78,6 +78,6 @@ describe('GqlAuthGuard', () => {
     await expect(activateWithRequest(req)).rejects.toThrow(
       UnauthorizedException,
     );
-    expect(req.user).toBeUndefined();
+    expect((req as Request & { user?: { id: string } }).user).toBeUndefined();
   });
 });

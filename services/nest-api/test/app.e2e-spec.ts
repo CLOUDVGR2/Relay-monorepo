@@ -6,6 +6,7 @@ import request from 'supertest';
 import { App } from 'supertest/types.js';
 import { AppModule } from '../src/app.module.js';
 import { configureApp } from '../src/configure-app.js';
+import { setupSwagger } from '../src/openapi/setup-swagger.js';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter.js';
 import { GqlAuthGuard } from '../src/auth/gql-auth.guard.js';
 
@@ -25,6 +26,7 @@ describe('Application (e2e)', () => {
 
     app = moduleFixture.createNestApplication();
     configureApp(app);
+    setupSwagger(app);
     app.useGlobalFilters(new HttpExceptionFilter());
     await app.init();
   });
@@ -60,8 +62,184 @@ describe('Application (e2e)', () => {
       .get('/docs/openapi.json')
       .expect(200);
 
-    expect(response.body.info.title).toBe('Fullstack Chat API');
-    expect(response.body.paths['/health']).toBeDefined();
+    const document = response.body;
+
+    expect(document.openapi).toMatch(/^3\./);
+    expect(document.info).toMatchObject({
+      title: 'Relay Platform API',
+      version: '1.0.0',
+    });
+
+    const paths = document.paths;
+    expect(paths).toEqual(
+      expect.objectContaining({
+        '/': expect.objectContaining({ get: expect.any(Object) }),
+        '/health': expect.objectContaining({ get: expect.any(Object) }),
+        '/health/ready': expect.objectContaining({ get: expect.any(Object) }),
+        '/jobs': expect.objectContaining({
+          get: expect.any(Object),
+          post: expect.any(Object),
+        }),
+        '/jobs/{id}': expect.objectContaining({ get: expect.any(Object) }),
+        '/calls/{callId}/recording': expect.objectContaining({
+          get: expect.any(Object),
+        }),
+        '/calls/{callId}/recording-upload': expect.objectContaining({
+          post: expect.any(Object),
+        }),
+        '/calls/recording-uploads/{uploadId}/refresh': expect.objectContaining({
+          post: expect.any(Object),
+        }),
+        '/calls/recording-uploads/{uploadId}/complete': expect.objectContaining({
+          post: expect.any(Object),
+        }),
+        '/internal/media-sessions/authorize': expect.objectContaining({
+          post: expect.any(Object),
+        }),
+      }),
+    );
+
+    // Every documented REST operation must expose the standardized
+    // HTTP 500 response using the shared error DTO.
+    const documentedOperations = [
+      paths['/'].get,
+      paths['/health'].get,
+      paths['/health/ready'].get,
+      paths['/jobs'].get,
+      paths['/jobs'].post,
+      paths['/jobs/{id}'].get,
+      paths['/calls/{callId}/recording'].get,
+      paths['/calls/{callId}/recording-upload'].post,
+      paths['/calls/recording-uploads/{uploadId}/refresh'].post,
+      paths['/calls/recording-uploads/{uploadId}/complete'].post,
+      paths['/internal/media-sessions/authorize'].post,
+    ];
+
+    expect(documentedOperations).toHaveLength(11);
+
+    for (const operation of documentedOperations) {
+      expect(operation.responses).toHaveProperty('500');
+      expect(operation.responses['500'].content['application/json'].schema)
+        .toEqual({
+          $ref: '#/components/schemas/ApiErrorResponseDto',
+        });
+    }
+
+    // Recording endpoint error descriptions must match service behavior.
+    const recordingPlayback = paths['/calls/{callId}/recording'].get;
+    expect(recordingPlayback.responses['400'].description)
+      .toBe('The call ID is not a valid UUID.');
+    expect(recordingPlayback.responses['404'].description)
+      .toBe('Call or recording not found or playback not authorized.');
+    expect(recordingPlayback.responses['409'].description)
+      .toBe('Recording is not ready for playback.');
+
+    const createRecordingUpload =
+      paths['/calls/{callId}/recording-upload'].post;
+    expect(createRecordingUpload.responses['400'].description)
+      .toBe('The call ID is not a valid UUID.');
+    expect(createRecordingUpload.responses['404'].description)
+      .toBe('Call not found or recording is not authorized.');
+    expect(createRecordingUpload.responses['409'].description)
+      .toBe('An upload is already completed.');
+
+    const refreshRecordingUpload =
+      paths['/calls/recording-uploads/{uploadId}/refresh'].post;
+    expect(refreshRecordingUpload.responses['400'].description)
+      .toBe('The upload ID is not a valid UUID.');
+    expect(refreshRecordingUpload.responses['404'].description)
+      .toBe('Upload not found or not authorized.');
+    expect(refreshRecordingUpload.responses['409'].description)
+      .toBe('Upload is no longer pending.');
+
+    const completeRecordingUpload =
+      paths['/calls/recording-uploads/{uploadId}/complete'].post;
+    expect(completeRecordingUpload.responses['400'].description)
+      .toBe('The upload ID, recording metadata, or uploaded object is invalid.');
+    expect(completeRecordingUpload.responses['404'].description)
+      .toBe('Upload not found or not authorized.');
+    expect(completeRecordingUpload.responses['409'].description)
+      .toBe(
+        'Upload is no longer pending or another completion request claimed it before this request.',
+      );
+
+    for (const operation of [
+      recordingPlayback,
+      createRecordingUpload,
+      refreshRecordingUpload,
+      completeRecordingUpload,
+    ]) {
+      for (const status of ['400', '404', '409']) {
+        expect(operation.responses[status].content['application/json'].schema)
+          .toEqual({
+            $ref: '#/components/schemas/ApiErrorResponseDto',
+          });
+      }
+    }
+
+    expect(document.components.securitySchemes).toMatchObject({
+      jwt: expect.objectContaining({
+        type: 'apiKey',
+        in: 'cookie',
+        name: 'jwt',
+      }),
+      internalBearer: expect.objectContaining({
+        type: 'http',
+        scheme: 'bearer',
+      }),
+    });
+
+    expect(document.components.securitySchemes.bearer).toMatchObject({
+      type: 'http',
+      scheme: 'bearer',
+    });
+
+    expect(paths['/jobs'].get.security).toContainEqual({ jwt: [] });
+    expect(paths['/jobs'].get.security).toContainEqual({ bearer: [] });
+
+    expect(paths['/jobs'].post.security).toEqual(
+      expect.arrayContaining([{ jwt: [] }, { bearer: [] }]),
+    );
+
+    expect(paths['/calls/{callId}/recording'].get.security).toEqual(
+      expect.arrayContaining([{ jwt: [] }, { bearer: [] }]),
+    );
+
+    expect(paths['/calls/{callId}/recording-upload'].post.security).toEqual(
+      expect.arrayContaining([{ jwt: [] }, { bearer: [] }]),
+    );
+
+    expect(paths['/internal/media-sessions/authorize'].post.security)
+      .toContainEqual({ internalBearer: [] });
+
+    const limitParameter = paths['/jobs'].get.parameters.find(
+      (parameter: { name: string }) => parameter.name === 'limit',
+    );
+    expect(limitParameter).toMatchObject({
+      in: 'query',
+      required: false,
+      schema: {
+        type: 'integer',
+        minimum: 1,
+        maximum: 100,
+        default: 50,
+        example: 50,
+      },
+    });
+
+    const schemas = document.components.schemas;
+    expect(schemas.ApiErrorResponseDto.properties.message.oneOf).toHaveLength(2);
+    expect(schemas.JobStatusResponseDto.properties.createdAt.format).toBe('date-time');
+    expect(schemas.JobStatusResponseDto.properties.updatedAt.format).toBe('date-time');
+    expect(schemas.RecordingTrackPlaybackResponseDto.properties.contentType.enum)
+      .toEqual(['audio/wav']);
+    expect(schemas.RecordingPlaybackResponseDto.properties.status.enum)
+      .toEqual(['READY']);
+    expect(schemas.AuthorizeMediaSessionResponseDto.properties.peerId).toMatchObject({
+      pattern: '^[0-9a-fA-F]{24}$',
+      minLength: 24,
+      maxLength: 24,
+    });
   });
 
 

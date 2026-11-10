@@ -11,6 +11,7 @@ import {
   ApiInternalServerErrorResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiServiceUnavailableResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import type { Connection } from 'mongoose';
@@ -74,6 +75,14 @@ export class HealthController {
         },
       },
     },
+  })
+  @ApiServiceUnavailableResponse({
+    description: 'The configured MongoDB database is unavailable.',
+    type: ApiErrorResponseDto,
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'An unexpected server error occurred.',
+    type: ApiErrorResponseDto,
   })
   async checkReadiness(): Promise<{
     status: string;

@@ -274,6 +274,12 @@ enum CallAudioTrackKind {
   REMOTE_PARTICIPANT
 }
 
+enum CallRecordingUploadStatus {
+  PENDING
+  COMPLETED
+  EXPIRED
+}
+
 enum CallTranscriptStatus {
   QUEUED
   PROCESSING
@@ -310,8 +316,8 @@ model CallSession {
 
   conversation Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   participants CallParticipant[]
-  recording   CallRecording?
-  summary     CallSummary?
+  recording    CallRecording?
+  summary      CallSummary?
 
   @@index([conversationId, createdAt(sort: Desc)])
   @@index([status, createdAt])
@@ -320,19 +326,20 @@ model CallSession {
 
 /// Stores each invitee's response and participation history.
 model CallParticipant {
-  id          String                @id @default(uuid()) @db.Uuid
-  callId      String                @db.Uuid
-  userId      String
-  status      CallParticipantStatus @default(INVITED)
-  invitedAt   DateTime              @default(now())
+  id                 String                @id @default(uuid()) @db.Uuid
+  callId             String                @db.Uuid
+  userId             String
+  status             CallParticipantStatus @default(INVITED)
+  invitedAt          DateTime              @default(now())
   respondedAt        DateTime?
   recordingConsent   Boolean?
   recordingConsentAt DateTime?
-  joinedAt            DateTime?
-  leftAt              DateTime?
-  hiddenAt            DateTime?             @db.Timestamp(3)
+  joinedAt           DateTime?
+  leftAt             DateTime?
+  hiddenAt           DateTime?             @db.Timestamp(3)
 
-  call CallSession @relation(fields: [callId], references: [id], onDelete: Cascade)
+  call             CallSession           @relation(fields: [callId], references: [id], onDelete: Cascade)
+  recordingUploads CallRecordingUpload[]
 
   @@unique([callId, userId])
   @@index([userId, invitedAt(sort: Desc)])
@@ -351,12 +358,35 @@ model CallRecording {
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt
 
-  call          CallSession          @relation(fields: [callId], references: [id], onDelete: Cascade)
+  call          CallSession           @relation(fields: [callId], references: [id], onDelete: Cascade)
   tracks        CallRecordingTrack[]
+  uploads       CallRecordingUpload[]
   processingJob CallProcessingJob?
 
   @@index([status, createdAt])
   @@map("call_recordings")
+}
+
+/// Server-issued authorization for one participant to upload one recording track.
+model CallRecordingUpload {
+  id            String                    @id @default(uuid()) @db.Uuid
+  recordingId   String                    @db.Uuid
+  participantId String                    @db.Uuid
+  kind          CallAudioTrackKind
+  objectKey     String                    @unique
+  status        CallRecordingUploadStatus @default(PENDING)
+  expiresAt     DateTime
+  completedAt   DateTime?
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+
+  recording   CallRecording   @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  participant CallParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@unique([recordingId, kind])
+  @@index([participantId, status])
+  @@index([status, expiresAt])
+  @@map("call_recording_uploads")
 }
 
 /// One independently uploaded PCM object for each side of the call.
@@ -374,7 +404,7 @@ model CallRecordingTrack {
   sha256      String
   createdAt   DateTime           @default(now())
 
-  recording  CallRecording  @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  recording  CallRecording   @relation(fields: [recordingId], references: [id], onDelete: Cascade)
   transcript CallTranscript?
 
   @@unique([recordingId, kind])
@@ -435,4 +465,3 @@ model CallProcessingJob {
   @@index([status, availableAt])
   @@map("call_processing_jobs")
 }
-

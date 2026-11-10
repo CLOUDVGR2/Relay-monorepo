@@ -3,7 +3,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConversationsResolver } from './conversations.resolver.js';
 import { ConversationsService } from './conversations.service.js';
-import { AIService } from '../ai/ai.service.js';
 
 describe('ConversationsResolver', () => {
   // Mock the service so these tests focus on resolver behavior.
@@ -11,14 +10,11 @@ describe('ConversationsResolver', () => {
     findAll: vi.fn(),
     findAllMessages: vi.fn(),
     findMessages: vi.fn(),
-    findMessagesForSummary: vi.fn(),
     create: vi.fn(),
     createMessage: vi.fn(),
     addParticipants: vi.fn(),
     updateDetails: vi.fn(),
   };
-
-  const aiService = { analyzeConversation: vi.fn() };
 
   const request = { user: { id: 'user-1' } };
   let resolver: ConversationsResolver;
@@ -29,7 +25,6 @@ describe('ConversationsResolver', () => {
 
     resolver = new ConversationsResolver(
       service as unknown as ConversationsService,
-      aiService as unknown as AIService,
     );
   });
 
@@ -85,35 +80,6 @@ describe('ConversationsResolver', () => {
     );
   });
 
-
-  // Ensure the resolver uses authenticated membership and server-fetched history.
-  it('summarizes authorized conversation messages', async () => {
-    const input = {
-      conversationId: '11111111-1111-4111-8111-111111111111',
-    };
-    const messages = [
-      { senderId: 'user-1', text: 'We will ship Friday.' },
-    ];
-    const analysis = {
-      summary: 'The team plans to ship Friday.',
-      decisions: ['Ship Friday'],
-      action_items: [],
-    };
-    service.findMessagesForSummary.mockResolvedValue(messages);
-    aiService.analyzeConversation.mockResolvedValue(analysis);
-
-    await expect(
-      resolver.summarizeConversation(input, request as never),
-    ).resolves.toEqual(analysis);
-
-    expect(service.findMessagesForSummary).toHaveBeenCalledWith(
-      input.conversationId,
-      'user-1',
-    );
-    expect(aiService.analyzeConversation).toHaveBeenCalledWith([
-      { sender: 'user-1', text: 'We will ship Friday.' },
-    ]);
-  });
 
   // Verify conversation creation delegates to the service.
   it('should create a conversation', async () => {

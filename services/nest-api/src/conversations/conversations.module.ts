@@ -11,11 +11,17 @@ import { TasksResolver } from './tasks.resolver.js';
 import { CallsService } from './calls.service.js';
 import { CallsResolver } from './calls.resolver.js';
 import { CallEventsPublisher } from './call-events.publisher.js';
+import { CallRecordingStorageService } from './call-recording-storage.service.js';
 import { InternalMediaSessionsController } from './internal-media-sessions.controller.js';
+import { CallRecordingUploadsController } from './call-recording-uploads.controller.js';
+import { CallRecordingUploadsService } from './call-recording-uploads.service.js';
 
 @Module({
   imports: [PrismaModule, AuthModule, AIModule],
-  controllers: [InternalMediaSessionsController],
+  controllers: [
+    InternalMediaSessionsController,
+    CallRecordingUploadsController,
+  ],
   providers: [
     ConversationsService,
     ConversationsResolver,
@@ -24,6 +30,8 @@ import { InternalMediaSessionsController } from './internal-media-sessions.contr
     CallsService,
     CallsResolver,
     CallEventsPublisher,
+    CallRecordingStorageService,
+    CallRecordingUploadsService,
   ],
 })
 export class ConversationsModule {}
