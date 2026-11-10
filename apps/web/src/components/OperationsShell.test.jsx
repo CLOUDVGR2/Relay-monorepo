@@ -86,14 +86,14 @@ describe("OperationsShell", () => {
   it("shows the correct title for infrastructure routes", () => {
     renderShell("/infrastructure");
     expect(
-      document.querySelector("p.truncate.text-sm.font-semibold")
+      document.querySelector("header p.truncate.font-semibold")
     ).toHaveTextContent("Infrastructure");
   });
 
   it("shows the correct title for the workspace route", () => {
     renderShell("/workspace");
     expect(
-      document.querySelector("p.truncate.text-sm.font-semibold")
+      document.querySelector("header p.truncate.font-semibold")
     ).toHaveTextContent("Messaging workspace");
   });
 
@@ -110,7 +110,7 @@ describe("OperationsShell", () => {
     expect(state.setTheme).toHaveBeenCalledWith("dark");
   });
 
-  it.each(["relay", "dark", "business", "night", "coffee", "dracula", "forest"])(
+  it.each(["dark", "business", "night", "coffee", "dracula", "forest"])(
     "switches dark theme %s to light",
     async (theme) => {
       state.theme = theme;
@@ -155,7 +155,7 @@ describe("OperationsShell", () => {
     renderShell(path);
 
     expect(
-      document.querySelector("p.truncate.text-sm.font-semibold"),
+      document.querySelector("header p.truncate.font-semibold"),
     ).toHaveTextContent(title);
 
     const matchingLinks = screen.getAllByRole("link", { name: link });

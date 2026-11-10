@@ -107,10 +107,10 @@ const MessageInput = () => {
   const canSend = Boolean(text.trim() || imagePreview) && !isSending;
 
   return (
-    <footer className="relative z-10 shrink-0 border-t border-base-300/70 bg-gradient-to-b from-base-100 to-base-200/30 px-3 pb-3 pt-3 sm:px-5 sm:pb-5 sm:pt-4 lg:px-8">
-      <form onSubmit={handleSendMessage} className="mx-auto w-full max-w-4xl">
+    <footer className="relative z-10 shrink-0 border-t border-base-300/60 bg-base-100/95 px-4 pb-4 pt-4 sm:px-6 sm:pb-5 lg:px-10">
+      <form onSubmit={handleSendMessage} className="mx-auto w-full max-w-5xl">
         {imagePreview && (
-          <div className="mb-3 flex items-start gap-3 rounded-2xl border border-base-300 bg-base-200/50 p-3">
+          <div className="mb-3 flex items-start gap-3 rounded-2xl border border-base-300/70 bg-base-200/40 p-3.5 shadow-sm">
             <div className="relative shrink-0">
               <img
                 src={imagePreview}
@@ -135,7 +135,7 @@ const MessageInput = () => {
           </div>
         )}
 
-        <div className="flex items-end gap-2 rounded-[1.4rem] border border-base-300/80 bg-base-200/60 p-2 shadow-sm transition duration-200 focus-within:border-primary/50 focus-within:bg-base-100 focus-within:shadow-lg focus-within:shadow-primary/5">
+        <div className="flex items-end gap-2 rounded-[1.5rem] border border-base-300/70 bg-base-200/40 p-2.5 shadow-sm transition duration-200 focus-within:border-primary/50 focus-within:bg-base-100 focus-within:shadow-xl focus-within:shadow-primary/[0.07]">
           <input
             ref={fileInputRef}
             type="file"
@@ -149,7 +149,7 @@ const MessageInput = () => {
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={isSending}
-            className={`btn btn-ghost btn-square size-10 shrink-0 rounded-2xl ${
+            className={`btn btn-ghost btn-square size-11 shrink-0 rounded-2xl ${
               imagePreview ? "text-primary" : "text-base-content/80"
             }`}
             aria-label="Attach an image"
@@ -174,15 +174,15 @@ const MessageInput = () => {
             aria-label="Message text"
             aria-describedby="message-keyboard-help"
             aria-keyshortcuts="Enter Shift+Enter"
-            className="max-h-36 min-h-10 min-w-0 flex-1 resize-none border-0 bg-transparent px-1 py-2.5 text-sm leading-5 text-base-content outline-none placeholder:text-base-content/80 focus:outline-none disabled:opacity-60"
+            className="max-h-36 min-h-11 min-w-0 flex-1 resize-none border-0 bg-transparent px-2 py-3 text-sm leading-6 text-base-content outline-none placeholder:text-base-content/55 focus:outline-none disabled:opacity-60"
           />
 
           <button
             type="submit"
             disabled={!canSend}
-            className={`btn btn-square size-10 shrink-0 rounded-2xl transition-all duration-200 ${
+            className={`btn btn-square size-11 shrink-0 rounded-2xl transition-all duration-200 ${
               canSend
-                ? "bg-primary text-primary-content shadow-md shadow-primary/20 hover:-translate-y-0.5 hover:shadow-lg"
+                ? "bg-primary text-primary-content shadow-lg shadow-primary/20 hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
                 : "border border-base-300 bg-base-100 text-base-content/60"
             }`}
             aria-label={isSending ? "Sending message" : "Send message"}
@@ -196,8 +196,8 @@ const MessageInput = () => {
           </button>
         </div>
 
-        <div className="flex items-center justify-between gap-3 px-2 pt-2.5">
-          <p id="message-keyboard-help" className="text-[11px] text-base-content/80">
+        <div className="flex items-center justify-between gap-3 px-3 pt-3">
+          <p id="message-keyboard-help" className="text-[11px] font-medium text-base-content/55">
             Enter to send <span className="px-1">·</span> Shift + Enter for a new line
           </p>
           <p

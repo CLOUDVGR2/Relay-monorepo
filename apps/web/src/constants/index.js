@@ -1,7 +1,6 @@
 /** Module entry point for the Relay web application. */
 
 export const THEMES = [
-  "relay",
   "light",
   "dark",
   "cupcake",

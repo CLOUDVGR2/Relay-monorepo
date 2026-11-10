@@ -49,7 +49,7 @@ const OperationsShell = () => {
   const { theme, setTheme } = useThemeStore();
   const location = useLocation();
 
-  const isDark = ["relay", "dark", "business", "night", "coffee", "dracula", "forest"].includes(theme);
+  const isDark = ["dark", "business", "night", "coffee", "dracula", "forest"].includes(theme);
   const displayName =
     authUser?.fullName ||
     authUser?.name ||
@@ -60,11 +60,11 @@ const OperationsShell = () => {
     <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-base-200 text-base-content lg:flex-row">
       <aside className="hidden w-[250px] shrink-0 flex-col border-r border-base-300 bg-base-100 lg:flex">
         <NavLink to="/" className="flex h-[76px] items-center gap-3 border-b border-base-300 px-6">
-          <span className="grid size-10 place-items-center rounded-xl bg-primary text-primary-content">
-            <Command size={22} />
+          <span className="grid size-10 place-items-center rounded-2xl bg-primary text-primary-content shadow-lg shadow-primary/20">
+            <Command size={21} className="text-blue-300" />
           </span>
           <span>
-            <span className="block text-lg font-bold tracking-tight">Relay</span>
+            <span className="block text-lg font-bold tracking-tight">Relay<span className="text-blue-300">.</span></span>
             <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-base-content/80">
               AI operations
             </span>
@@ -173,18 +173,18 @@ const OperationsShell = () => {
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="sticky top-0 z-30 flex h-[68px] items-center justify-between gap-3 border-b border-base-300 bg-base-100/90 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
+        <header className="sticky top-0 z-30 flex min-h-[76px] items-center justify-between gap-3 border-b border-base-300/80 bg-base-100/95 px-4 shadow-sm shadow-base-content/[0.03] backdrop-blur-xl sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <NavLink to="/" className="flex items-center gap-2 lg:hidden">
-              <span className="grid size-9 place-items-center rounded-xl bg-primary text-primary-content">
-                <Command size={19} />
+              <span className="grid size-9 place-items-center rounded-xl bg-primary text-primary-content shadow-md shadow-primary/20">
+                <Command size={19} className="text-blue-300" />
               </span>
-              <span className="font-bold">Relay</span>
+              <span className="font-bold">Relay<span className="text-blue-300">.</span></span>
             </NavLink>
             <span className="hidden h-5 w-px bg-base-300 lg:block" />
-            <div className="min-w-0">
-              <p className="truncate text-xs text-base-content/80">Workspace / Platform</p>
-              <p className="truncate text-sm font-semibold">
+            <div className="min-w-0 py-2">
+              <p className="mb-1 truncate text-[9px] font-bold uppercase tracking-[0.2em] text-base-content/45">Relay · Workspace</p>
+              <p className="truncate text-[15px] font-semibold tracking-tight">
                 {sections.flatMap((section) => section.items).find((item) =>
                   item.end ? location.pathname === item.path : location.pathname.startsWith(item.path)
                 )?.label ||
@@ -199,24 +199,34 @@ const OperationsShell = () => {
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
-            <span className="hidden items-center gap-2 rounded-full border border-base-300 px-3 py-1.5 text-[11px] text-base-content sm:flex">
-              <span className="size-1.5 rounded-full bg-base-content/30" />
-              Live health checks · 30s refresh
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            <span
+              role="status"
+              aria-label="Live health checks refresh every 30 seconds"
+              className="hidden items-center gap-2.5 rounded-2xl border border-success/20 bg-success/[0.06] px-3.5 py-2 sm:flex"
+            >
+              <span className="relative flex size-2 shrink-0">
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-success/40" />
+                <span className="relative inline-flex size-2 rounded-full bg-success" />
+              </span>
+              <span className="flex flex-col gap-0.5">
+                <span className="text-[11px] font-semibold leading-none text-base-content">Live monitoring</span>
+                <span className="text-[9px] font-medium tracking-wide text-base-content/50">Refreshes every 30 sec</span>
+              </span>
             </span>
             <button
               type="button"
               onClick={() => setTheme(isDark ? "light" : "dark")}
               aria-label={`Switch to ${isDark ? "light" : "dark"} theme`}
               title="Toggle theme"
-              className="grid size-9 place-items-center rounded-xl border border-base-300 text-base-content/80 transition hover:bg-base-200"
+              className="grid size-10 place-items-center rounded-xl border border-base-300/80 bg-base-100 text-base-content/70 transition hover:border-primary/30 hover:bg-base-200 hover:text-base-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               {isDark ? <Sun size={17} /> : <Moon size={17} />}
             </button>
             <NavLink
               to="/settings"
               aria-label="Settings"
-              className="grid size-9 place-items-center rounded-xl border border-base-300 text-base-content/80 transition hover:bg-base-200"
+              className="grid size-10 place-items-center rounded-xl border border-base-300/80 bg-base-100 text-base-content/70 transition hover:border-primary/30 hover:bg-base-200 hover:text-base-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <Settings size={17} />
             </NavLink>

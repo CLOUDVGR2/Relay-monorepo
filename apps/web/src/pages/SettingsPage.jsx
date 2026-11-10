@@ -13,9 +13,9 @@ const SettingsPage = () => {
   const { theme, setTheme } = useThemeStore();
 
   return (
-    <main className="min-h-full px-4 pb-10 pt-7 text-base-content sm:px-6 lg:px-10 lg:pt-10">
-      <div className="mx-auto max-w-6xl space-y-8">
-        <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <main className="min-h-full px-4 pb-10 pt-6 text-base-content sm:px-6 sm:pt-8 lg:px-10 lg:pt-10">
+      <div className="mx-auto max-w-7xl space-y-7">
+        <header className="flex flex-col gap-5 border-b border-base-300/70 pb-7 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/[0.08] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-base-content">
               <Sparkles size={13} />
@@ -45,8 +45,8 @@ const SettingsPage = () => {
           </div>
         </header>
 
-        <section className="rounded-3xl border border-base-300/80 bg-base-100 p-4 shadow-sm sm:p-6 lg:p-7">
-          <div className="mb-6 flex items-start gap-3">
+        <section className="rounded-3xl border border-base-300/70 bg-base-100 p-5 shadow-sm sm:p-7 lg:p-8">
+          <div className="mb-7 flex items-start gap-4">
             <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
               <Palette size={19} />
             </div>
@@ -58,7 +58,7 @@ const SettingsPage = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6">
             {THEMES.map((t) => {
               const isSelected = theme === t;
 
@@ -69,7 +69,7 @@ const SettingsPage = () => {
                   aria-pressed={isSelected}
                   aria-label={`Use ${t} theme`}
                   onClick={() => setTheme(t)}
-                  className={`group rounded-2xl border p-2.5 text-left transition duration-200 ${
+                  className={`group rounded-2xl border p-3 text-left transition duration-200 hover:-translate-y-0.5 ${
                     isSelected
                       ? "border-primary bg-primary/[0.07] shadow-md shadow-primary/10 ring-1 ring-primary/30"
                       : "border-base-300/80 bg-base-100 hover:border-primary/40 hover:bg-base-200/50"
@@ -124,8 +124,8 @@ const SettingsPage = () => {
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-3xl border border-base-300/80 bg-base-100 shadow-sm">
-          <div className="flex flex-col gap-2 border-b border-base-300/80 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+        <section className="overflow-hidden rounded-3xl border border-base-300/70 bg-base-100 shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-base-300/70 px-5 py-6 sm:flex-row sm:items-center sm:justify-between sm:px-7">
             <div>
               <h2 className="text-lg font-semibold tracking-tight">Live preview</h2>
               <p className="mt-1 text-xs text-base-content/55">
@@ -138,8 +138,8 @@ const SettingsPage = () => {
             </span>
           </div>
 
-          <div className="bg-base-200/60 p-3 sm:p-7 lg:p-9">
-            <div className="mx-auto max-w-2xl overflow-hidden rounded-2xl border border-base-300/80 bg-base-100 shadow-xl shadow-black/[0.05]">
+          <div className="bg-base-200/40 p-4 sm:p-8 lg:p-10">
+            <div className="mx-auto max-w-3xl overflow-hidden rounded-2xl border border-base-300/80 bg-base-100 shadow-xl shadow-black/[0.06]">
               <div className="flex items-center justify-between border-b border-base-300/80 bg-base-100 px-4 py-4 sm:px-5">
                 <div className="flex min-w-0 items-center gap-3">
                   <div className="relative grid size-10 shrink-0 place-items-center rounded-full bg-primary text-sm font-semibold text-primary-content">

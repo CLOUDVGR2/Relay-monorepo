@@ -14,7 +14,6 @@ import {
   Send,
   ShieldCheck,
   Sparkles,
-  X,
 } from "lucide-react";
 import { axiosInstance } from "../lib/axios";
 
@@ -59,6 +58,16 @@ function Citation({ citation, index }) {
             ? ` · Characters ${citation.start}–${citation.end}`
             : ""}
         </p>
+        {citation.content?.trim() && (
+          <details className="mt-3 rounded-lg border border-base-300 bg-base-200/50 p-3">
+            <summary className="cursor-pointer text-xs font-semibold text-primary">
+              View evidence excerpt
+            </summary>
+            <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-base-content/80">
+              {citation.content.trim()}
+            </p>
+          </details>
+        )}
         {source && (
           isExternal ? (
             <a
@@ -84,7 +93,6 @@ export default function AIAssistantPage() {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState("");
   const [showSources, setShowSources] = useState({});
   const inputRef = useRef(null);
   const bottomRef = useRef(null);
@@ -94,22 +102,44 @@ export default function AIAssistantPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, isLoading]);
 
-  async function askQuestion(value = question) {
+  async function askQuestion(value = question, retryMessageId = null) {
     const trimmed = value.trim();
 
     if (!trimmed || trimmed.length > 2000 || requestRef.current) return;
 
     requestRef.current = true;
     setIsLoading(true);
-    setError("");
     setQuestion("");
 
-    const messageId = `${Date.now()}-${messages.length}`;
+    const messageId = retryMessageId || `${Date.now()}-${messages.length}`;
 
-    setMessages((current) => [
-      ...current,
-      { id: messageId, question: trimmed, answer: null, citations: [] },
-    ]);
+    if (retryMessageId) {
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === retryMessageId
+            ? {
+                ...message,
+                answer: null,
+                citations: [],
+                error: null,
+                status: "pending",
+              }
+            : message,
+        ),
+      );
+    } else {
+      setMessages((current) => [
+        ...current,
+        {
+          id: messageId,
+          question: trimmed,
+          answer: null,
+          citations: [],
+          error: null,
+          status: "pending",
+        },
+      ]);
+    }
 
     try {
       const response = await axiosInstance.post("/ai/answer", {
@@ -129,7 +159,7 @@ export default function AIAssistantPage() {
       setMessages((current) =>
         current.map((message) =>
           message.id === messageId
-            ? { ...message, answer, citations }
+            ? { ...message, answer, citations, error: null, status: "succeeded" }
             : message,
         ),
       );
@@ -148,11 +178,13 @@ export default function AIAssistantPage() {
                   ? "The AI service is temporarily unavailable. Check that Python AI and Ollama are running."
                   : "We couldn't complete your request. Please try again.";
 
-      setError(message);
       setMessages((current) =>
-        current.filter((item) => item.id !== messageId),
+        current.map((item) =>
+          item.id === messageId
+            ? { ...item, answer: null, citations: [], error: message, status: "failed" }
+            : item,
+        ),
       );
-      setQuestion(trimmed);
     } finally {
       requestRef.current = false;
       setIsLoading(false);
@@ -163,7 +195,6 @@ export default function AIAssistantPage() {
   function startNewConversation() {
     if (isLoading) return;
     setMessages([]);
-    setError("");
     setQuestion("");
     setShowSources({});
     inputRef.current?.focus();
@@ -293,6 +324,24 @@ export default function AIAssistantPage() {
                     </div>
                   </div>
 
+                  {message.status === "failed" && (
+                    <div role="alert" className="ml-12 max-w-2xl rounded-xl border border-error/25 bg-error/5 p-4">
+                      <div className="flex items-start gap-2 text-sm leading-6">
+                        <CircleAlert size={17} className="mt-0.5 shrink-0 text-error" />
+                        <p>{message.error || "This request could not be completed."}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => askQuestion(message.question, message.id)}
+                        disabled={isLoading}
+                        className="mt-3 inline-flex min-h-9 items-center gap-2 rounded-lg border border-error/30 bg-base-100 px-3 text-xs font-semibold text-base-content transition hover:border-error/60 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <ArrowRight size={14} />
+                        Retry this question
+                      </button>
+                    </div>
+                  )}
+
                   {message.answer ? (
                     <div className="flex items-start gap-3">
                       <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
@@ -376,24 +425,6 @@ export default function AIAssistantPage() {
 
             <div ref={bottomRef} />
           </div>
-
-          {error && (
-            <div
-              role="alert"
-              className="mx-4 mb-3 flex items-start gap-3 rounded-xl border border-error/25 bg-error/5 p-3 text-sm sm:mx-6"
-            >
-              <CircleAlert size={17} className="mt-0.5 shrink-0 text-error" />
-              <p className="flex-1 leading-6">{error}</p>
-              <button
-                type="button"
-                onClick={() => setError("")}
-                aria-label="Dismiss error"
-                className="rounded-lg p-1 hover:bg-base-300"
-              >
-                <X size={15} />
-              </button>
-            </div>
-          )}
 
           <form
             onSubmit={(event) => {

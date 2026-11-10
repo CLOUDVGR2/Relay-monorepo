@@ -95,7 +95,7 @@ function formatDate(value) {
 
 function MetricCard({ title, value, description, icon: Icon }) {
   return (
-    <article className="rounded-2xl border border-base-300/70 bg-base-100 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+    <article className="rounded-2xl border border-base-300/70 bg-base-100 p-5 shadow-sm transition-colors duration-200">
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm font-medium text-base-content/65">{title}</p>
         <span className="grid size-9 place-items-center rounded-xl bg-primary/10 text-primary">
@@ -125,6 +125,43 @@ function SectionHeading({ eyebrow, title, action }) {
       </div>
       {action}
     </div>
+  );
+}
+
+function ExecutionStatusBadge({ status }) {
+  const normalized = String(status || "unknown").trim().toLowerCase();
+
+  const styles = {
+    succeeded: "border-success/25 bg-success/10 text-success",
+    completed: "border-success/25 bg-success/10 text-success",
+    failed: "border-error/25 bg-error/10 text-error",
+    running: "border-primary/25 bg-primary/10 text-primary",
+    processing: "border-primary/25 bg-primary/10 text-primary",
+    queued: "border-info/25 bg-info/10 text-info",
+    pending: "border-info/25 bg-info/10 text-info",
+    cancelled: "border-warning/25 bg-warning/10 text-warning",
+  };
+
+  const Icon =
+    ["succeeded", "completed"].includes(normalized)
+      ? CheckCircle2
+      : normalized === "failed"
+        ? XCircle
+        : ["running", "processing"].includes(normalized)
+          ? Zap
+          : normalized === "cancelled"
+            ? AlertCircle
+            : Clock3;
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold capitalize ${
+        styles[normalized] || "border-base-300 bg-base-200 text-base-content/70"
+      }`}
+    >
+      <Icon size={12} aria-hidden="true" />
+      {normalized.replaceAll("_", " ")}
+    </span>
   );
 }
 
@@ -338,13 +375,30 @@ export default function IntelligencePage() {
     );
   }, [aiTelemetry]);
 
+  const aiFailureRate =
+    aiTotals.requests > 0
+      ? `${((aiTotals.failures / aiTotals.requests) * 100).toFixed(1)}%`
+      : "—";
+
+  const sourceErrors = [jobsError, telemetryError, runsError].filter(
+    Boolean,
+  ).length;
+
+  const sourceIndicator = loading
+    ? { label: "Checking data sources", tone: "border-info/25 bg-info/5 text-info" }
+    : sourceErrors === 0
+      ? { label: "All data sources connected", tone: "border-success/25 bg-success/5 text-success" }
+      : sourceErrors === 3
+        ? { label: "Data sources unavailable", tone: "border-error/25 bg-error/5 text-error" }
+        : { label: `${3 - sourceErrors} of 3 sources connected`, tone: "border-warning/25 bg-warning/5 text-warning" };
+
   return (
     <main className="min-h-full bg-base-200/70 px-4 pb-12 pt-24 text-base-content sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1440px]">
         <header className="mb-8 flex flex-col justify-between gap-5 md:flex-row md:items-end">
           <div>
             <div className="mb-3 flex items-center gap-2 text-xs text-base-content/55">
-              <span>Relay</span>
+              <span>Relay<span className="text-blue-300">.</span></span>
               <span>/</span>
               <span className="text-base-content">Intelligence</span>
             </div>
@@ -352,9 +406,12 @@ export default function IntelligencePage() {
               <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
                 Intelligence
               </h1>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-success/25 bg-success/5 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-success">
+              <span
+                role="status"
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${sourceIndicator.tone}`}
+              >
                 <Activity size={12} />
-                Live data sources
+                {sourceIndicator.label}
               </span>
             </div>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-base-content/65">
@@ -440,12 +497,12 @@ export default function IntelligencePage() {
 
         <section
           aria-label="Operational metrics"
-          className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4"
+          className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
         >
           <MetricCard
             title="Jobs in period"
             value={loading && jobs.length === 0 ? "—" : formatNumber(filteredJobs.length)}
-            description="Authenticated job records matching the selected date range"
+            description="Authenticated job records in the selected date range"
             icon={Workflow}
           />
           <MetricCard
@@ -467,6 +524,18 @@ export default function IntelligencePage() {
               : formatNumber(filteredRuns.length)}
             description="Persistent AI answer runs in the selected period"
             icon={Bot}
+          />
+          <MetricCard
+            title="AI requests"
+            value={telemetryError || !aiTelemetry ? "—" : formatNumber(aiTotals.requests)}
+            description="Process-local Python service request count"
+            icon={Activity}
+          />
+          <MetricCard
+            title="AI failure rate"
+            value={telemetryError || !aiTelemetry ? "—" : aiFailureRate}
+            description={`${formatNumber(aiTotals.failures)} failed requests · process-local`}
+            icon={AlertCircle}
           />
         </section>
 
@@ -652,9 +721,7 @@ export default function IntelligencePage() {
                         </p>
                       </div>
                       <div className="text-right">
-                        <span className="inline-flex rounded-full border border-base-300 px-2.5 py-1 text-xs capitalize">
-                          {status}
-                        </span>
+                        <ExecutionStatusBadge status={status} />
                         <p className="mt-1 text-xs text-base-content/50">
                           {formatDate(job.createdAt)}
                         </p>
@@ -728,9 +795,7 @@ export default function IntelligencePage() {
                         )}
                       </div>
                       <div className="text-right">
-                        <span className="inline-flex rounded-full border border-base-300 px-2.5 py-1 text-xs capitalize">
-                          {status}
-                        </span>
+                        <ExecutionStatusBadge status={status} />
                         <p className="mt-1 text-xs text-base-content/50">
                           {Number.isFinite(run.durationMs)
                             ? `${formatNumber(run.durationMs)} ms`

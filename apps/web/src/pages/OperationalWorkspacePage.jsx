@@ -108,37 +108,51 @@ function runStatusClasses(status) {
   }
 }
 
+function formatRunDuration(value, status) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return status === "running" ? "In progress" : "Unavailable";
+  }
+
+  const duration = Math.max(0, Number(value));
+  if (duration < 1000) return `${Math.round(duration)} ms`;
+  if (duration < 60000) return `${(duration / 1000).toFixed(1)} s`;
+
+  const minutes = Math.floor(duration / 60000);
+  const seconds = Math.floor((duration % 60000) / 1000);
+  return `${minutes}m ${seconds}s`;
+}
+
 const WORKSPACES = {
   agents: {
     eyebrow: "AI OPERATIONS",
     title: "AI Runs",
     description:
-      "Explore agent executions, tool calls, outcomes, durations, and failures.",
+      "Monitor authenticated AI answer executions, outcomes, durations, and failure categories.",
     icon: Bot,
-    status: "Execution data not connected",
+    status: "AI execution history",
     capabilities: [
       {
         title: "Execution history",
         description:
-          "A chronological view of agent runs, once an execution-history endpoint is connected.",
+          "Browse the latest user-scoped AI answer execution records.",
         category: "Monitoring",
       },
       {
         title: "Run outcomes",
         description:
-          "Inspect completed, failed, and in-progress executions using verified backend records.",
+          "Track running, succeeded, and failed AI answer executions.",
         category: "Monitoring",
       },
       {
-        title: "Tool calls",
+        title: "Execution timing",
         description:
-          "Review tool inputs, outputs, and execution traces when supported by the AI service.",
-        category: "Debugging",
+          "Review recorded start times, completion durations, and in-progress runs.",
+        category: "Performance",
       },
       {
-        title: "Failure investigation",
+        title: "Failure classification",
         description:
-          "Identify errors and inspect diagnostic details from actual execution records.",
+          "Identify timeout, service availability, upstream, and internal error categories.",
         category: "Debugging",
       },
     ],
@@ -215,32 +229,32 @@ const WORKSPACES = {
     eyebrow: "KNOWLEDGE SYSTEMS",
     title: "Knowledge & Retrieval",
     description:
-      "Explore knowledge sources, retrieval activity, and AI search infrastructure.",
+      "Ingest tenant-scoped documents, retrieve ranked passages, and generate citation-backed answers from indexed knowledge.",
     icon: Database,
-    status: "Knowledge records not connected",
+    status: "Tenant-scoped knowledge service",
     capabilities: [
       {
         title: "Knowledge sources",
         description:
-          "Inspect indexed documents and source metadata from the knowledge service.",
+          "Ingest documents and inspect indexed source metadata returned by the authenticated knowledge service.",
         category: "Sources",
       },
       {
-        title: "Retrieval search",
+        title: "Ranked passage retrieval",
         description:
-          "Search indexed content once a supported retrieval endpoint is available.",
+          "Search indexed document chunks and inspect their hybrid retrieval ranking and source metadata.",
         category: "Retrieval",
       },
       {
-        title: "Retrieval diagnostics",
+        title: "Grounded answers",
         description:
-          "Review returned source references and relevance details from real searches.",
+          "Generate answers from retrieved evidence and inspect the citations validated by the answer service.",
         category: "Retrieval",
       },
       {
-        title: "Index health",
+        title: "Index status",
         description:
-          "Inspect indexing progress and failures when the backend exposes those details.",
+          "Review document ingestion status and source metadata exposed by the knowledge API.",
         category: "Sources",
       },
     ],
@@ -285,6 +299,8 @@ export default function OperationalWorkspacePage({ workspace }) {
   const [runsRefreshing, setRunsRefreshing] = useState(false);
   const [runsError, setRunsError] = useState("");
   const [runsUpdatedAt, setRunsUpdatedAt] = useState(null);
+  const [runSearch, setRunSearch] = useState("");
+  const [runStatusFilter, setRunStatusFilter] = useState("all");
 
   const [knowledgeDocuments, setKnowledgeDocuments] = useState([]);
   const [knowledgeLoading, setKnowledgeLoading] = useState(true);
@@ -401,32 +417,57 @@ export default function OperationalWorkspacePage({ workspace }) {
     setKnowledgeAnswer(null);
     setKnowledgeResults([]);
 
-    try {
-      const payload = await fetchWorkspaceJson(
-        `${EXPRESS_API_URL}/ai/answer`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: query, top_k: 5 }),
-        },
-      );
+    const [retrievalOutcome, answerOutcome] = await Promise.allSettled([
+      fetchWorkspaceJson(`${EXPRESS_API_URL}/ai/documents/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, top_k: 5 }),
+      }),
+      fetchWorkspaceJson(`${EXPRESS_API_URL}/ai/answer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: query, top_k: 5 }),
+      }),
+    ]);
 
+    const errors = [];
+
+    if (retrievalOutcome.status === "fulfilled") {
+      const payload = retrievalOutcome.value;
+      if (
+        typeof payload?.query !== "string" ||
+        !Array.isArray(payload?.results)
+      ) {
+        errors.push("Passage retrieval returned an unexpected response.");
+      } else {
+        setKnowledgeResults(payload.results);
+      }
+    } else {
+      setKnowledgeResults([]);
+      errors.push(
+        `Passage retrieval failed: ${retrievalOutcome.reason?.message || "Unknown retrieval error."}`,
+      );
+    }
+
+    if (answerOutcome.status === "fulfilled") {
+      const payload = answerOutcome.value;
       if (
         typeof payload?.answer !== "string" ||
         !Array.isArray(payload?.citations)
       ) {
-        throw new Error("Unexpected knowledge answer response.");
+        errors.push("Grounded answer generation returned an unexpected response.");
+      } else {
+        setKnowledgeAnswer(payload);
       }
-
-      setKnowledgeAnswer(payload);
-    } catch (error) {
+    } else {
       setKnowledgeAnswer(null);
-      setKnowledgeSearchError(
-        error.message || "Knowledge answer generation failed.",
+      errors.push(
+        `Grounded answer generation failed: ${answerOutcome.reason?.message || "Unknown answer error."}`,
       );
-    } finally {
-      setKnowledgeSearching(false);
     }
+
+    setKnowledgeSearchError(errors.join(" "));
+    setKnowledgeSearching(false);
   };
 
 
@@ -462,6 +503,29 @@ export default function OperationalWorkspacePage({ workspace }) {
 
     return () => window.clearInterval(intervalId);
   }, [workspace, loadRuns]);
+
+  const runSummary = useMemo(() => ({
+    total: runs.length,
+    running: runs.filter((run) => run.status === "running").length,
+    succeeded: runs.filter((run) => run.status === "succeeded").length,
+    failed: runs.filter((run) => run.status === "failed").length,
+  }), [runs]);
+
+  const filteredRuns = useMemo(() => {
+    const query = runSearch.trim().toLowerCase();
+
+    return runs.filter((run) => {
+      const matchesStatus =
+        runStatusFilter === "all" || run.status === runStatusFilter;
+      const searchableText = [
+        run.operation,
+        run.status,
+        run.errorCategory,
+        run._id,
+      ].filter(Boolean).join(" ").toLowerCase();
+      return matchesStatus && (!query || searchableText.includes(query));
+    });
+  }, [runs, runSearch, runStatusFilter]);
 
   const categories = useMemo(
     () => ["All", ...new Set(config.capabilities.map((item) => item.category))],
@@ -511,6 +575,8 @@ export default function OperationalWorkspacePage({ workspace }) {
             setRefreshedAt(new Date().toLocaleTimeString());
             setSearch("");
             setCategory("All");
+            setRunSearch("");
+            setRunStatusFilter("all");
             if (workspace === "agents") loadRuns(true);
             if (workspace === "knowledge") loadKnowledgeDocuments();
           }}
@@ -699,7 +765,7 @@ export default function OperationalWorkspacePage({ workspace }) {
             </p>
             <h2 className="mt-2 text-xl font-semibold">Search indexed knowledge</h2>
             <p className="mt-1 text-sm text-base-content/65">
-              Search relevant document passages and inspect the returned sources.
+              Retrieve ranked document passages and generate a separate answer grounded in their indexed evidence.
             </p>
 
             <form onSubmit={searchKnowledge} className="mt-4 flex flex-col gap-3 sm:flex-row">
@@ -835,7 +901,7 @@ export default function OperationalWorkspacePage({ workspace }) {
                       <h3 className="text-sm font-semibold">{result.title || "Retrieved passage"}</h3>
                       {Number.isFinite(Number(result.score)) && (
                         <span className="text-xs text-base-content/60">
-                          Relevance score: {Number(result.score).toFixed(3)}
+                          RRF ranking score: {Number(result.score).toFixed(4)}
                         </span>
                       )}
                     </div>
@@ -856,7 +922,29 @@ export default function OperationalWorkspacePage({ workspace }) {
       )}
 
       {workspace === "agents" && (
-        <section className="rounded-2xl border border-base-300/80 bg-base-100 p-5 shadow-sm sm:p-6">
+        <section className="space-y-5">
+          <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+            {[
+              { label: "Total runs", value: runSummary.total, detail: "Latest records", icon: Bot, tone: "text-primary" },
+              { label: "Running", value: runSummary.running, detail: "Currently in progress", icon: RefreshCw, tone: "text-primary" },
+              { label: "Succeeded", value: runSummary.succeeded, detail: "Completed successfully", icon: CheckCircle2, tone: "text-success" },
+              { label: "Failed", value: runSummary.failed, detail: "Require investigation", icon: CircleHelp, tone: "text-error" },
+            ].map((metric) => {
+              const MetricIcon = metric.icon;
+              return (
+                <article key={metric.label} className="rounded-2xl border border-base-300/80 bg-base-100 p-4 shadow-sm sm:p-5">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-medium text-base-content/60">{metric.label}</p>
+                    <MetricIcon size={17} className={metric.tone} />
+                  </div>
+                  <p className="mt-3 text-2xl font-semibold tracking-tight tabular-nums">{metric.value.toLocaleString()}</p>
+                  <p className="mt-1 text-[11px] text-base-content/50">{metric.detail}</p>
+                </article>
+              );
+            })}
+          </div>
+
+          <section className="rounded-2xl border border-base-300/80 bg-base-100 p-5 shadow-sm sm:p-6">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">
@@ -881,11 +969,18 @@ export default function OperationalWorkspacePage({ workspace }) {
             </button>
           </div>
 
-          {runsUpdatedAt && (
-            <p className="mt-3 text-[11px] text-base-content/50">
-              Last updated {formatRunDate(runsUpdatedAt)}
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[11px] text-base-content/50">
+              {runsUpdatedAt
+                ? `Last updated ${formatRunDate(runsUpdatedAt)}`
+                : "Waiting for the first successful refresh"}
+              <span className="mx-2">·</span>
+              Auto-refresh every 30 seconds
             </p>
-          )}
+            <p className="text-[11px] text-base-content/50">
+              {runs.length.toLocaleString()} of up to 100 recent records
+            </p>
+          </div>
 
           {runsError && (
             <div
@@ -921,8 +1016,68 @@ export default function OperationalWorkspacePage({ workspace }) {
           )}
 
           {!runsLoading && runs.length > 0 && (
-            <div className="mt-5 space-y-3">
-              {runs.map((run, index) => (
+            <>
+              <div className="mt-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_190px]">
+                <label className="flex min-h-11 items-center gap-2 rounded-xl border border-base-300 bg-base-100 px-3">
+                  <Search size={16} className="shrink-0 text-base-content/45" />
+                  <input
+                    value={runSearch}
+                    onChange={(event) => setRunSearch(event.target.value)}
+                    placeholder="Search operation, error, or run ID…"
+                    aria-label="Search AI runs"
+                    className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-base-content/40"
+                  />
+                  {runSearch && (
+                    <button type="button" onClick={() => setRunSearch("")} className="text-xs font-semibold text-primary">
+                      Clear
+                    </button>
+                  )}
+                </label>
+                <label className="flex min-h-11 items-center gap-2 rounded-xl border border-base-300 px-3">
+                  <span className="shrink-0 text-xs text-base-content/55">Status</span>
+                  <select
+                    value={runStatusFilter}
+                    onChange={(event) => setRunStatusFilter(event.target.value)}
+                    aria-label="Filter AI runs by status"
+                    className="min-w-0 flex-1 bg-transparent text-sm outline-none"
+                  >
+                    <option value="all">All statuses</option>
+                    <option value="running">Running</option>
+                    <option value="succeeded">Succeeded</option>
+                    <option value="failed">Failed</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-base-content/55">
+                <span>
+                  Showing {filteredRuns.length.toLocaleString()} of {runs.length.toLocaleString()} runs
+                </span>
+                {(runSearch || runStatusFilter !== "all") && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRunSearch("");
+                      setRunStatusFilter("all");
+                    }}
+                    className="font-semibold text-primary hover:underline"
+                  >
+                    Clear filters
+                  </button>
+                )}
+              </div>
+
+              {filteredRuns.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-base-300 px-5 py-9 text-center">
+                  <Search size={22} className="mx-auto text-base-content/40" />
+                  <p className="mt-3 text-sm font-semibold">No matching AI runs</p>
+                  <p className="mt-1 text-xs text-base-content/60">
+                    Try another search term or clear the selected status filter.
+                  </p>
+                </div>
+              ) : (
+              <div className="space-y-3">
+              {filteredRuns.map((run, index) => (
                 <article
                   key={run._id || `${run.startedAt || run.createdAt}-${index}`}
                   className="rounded-xl border border-base-300/80 p-4 transition hover:border-primary/30"
@@ -949,10 +1104,7 @@ export default function OperationalWorkspacePage({ workspace }) {
                       <span>
                         Duration:{" "}
                         <strong className="font-semibold text-base-content">
-                          {Number.isFinite(Number(run.durationMs)) &&
-                          run.durationMs !== null
-                            ? `${Number(run.durationMs).toLocaleString()} ms`
-                            : "Unavailable"}
+                          {formatRunDuration(run.durationMs, run.status)}
                         </strong>
                       </span>
                       {run.errorCategory && (
@@ -967,8 +1119,11 @@ export default function OperationalWorkspacePage({ workspace }) {
                   </div>
                 </article>
               ))}
-            </div>
+              </div>
+              )}
+            </>
           )}
+          </section>
         </section>
       )}
 

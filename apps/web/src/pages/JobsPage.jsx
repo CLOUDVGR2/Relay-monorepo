@@ -7,9 +7,10 @@ import {
   Clock3,
   LoaderCircle,
   RefreshCw,
+  Search,
+  SlidersHorizontal,
   Workflow,
   XCircle,
-  RotateCw,
   CalendarClock,
 } from "lucide-react";
 
@@ -21,7 +22,6 @@ const API_BASE_URL = (
 const STATUS_STYLES = {
   queued: "border-info/25 bg-info/10 text-info",
   processing: "border-primary/25 bg-primary/10 text-primary",
-  retrying: "border-warning/25 bg-warning/10 text-warning",
   completed: "border-success/25 bg-success/10 text-success",
   failed: "border-error/25 bg-error/10 text-error",
 };
@@ -59,9 +59,7 @@ function StatusBadge({ status }) {
       ? CheckCircle2
       : normalized === "failed"
         ? XCircle
-        : normalized === "retrying"
-          ? RotateCw
-          : normalized === "processing"
+        : normalized === "processing"
             ? LoaderCircle
             : Clock3;
 
@@ -88,6 +86,9 @@ export default function JobsPage() {
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [historyError, setHistoryError] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   const loadJobHistory = useCallback(async (manualRefresh = false) => {
     if (!API_BASE_URL) {
@@ -141,13 +142,9 @@ export default function JobsPage() {
         throw new Error("The API returned an unexpected job-history format.");
       }
 
-      setHistory(
-        [...jobs].sort((a, b) => {
-          const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime();
-          const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
-          return dateB - dateA;
-        }),
-      );
+      // The API already returns newest-created jobs first; preserve that order.
+      setHistory(jobs);
+      setLastUpdated(new Date());
     } catch (err) {
       setHistoryError(
         err instanceof TypeError
@@ -270,8 +267,25 @@ export default function JobsPage() {
   ).length;
 
   const activeCount = history.filter((item) =>
-    ["queued", "processing", "retrying"].includes(item.status),
+    ["queued", "processing"].includes(
+      String(item.status || "").trim().toLowerCase(),
+    ),
   ).length;
+
+  const filteredJobs = history.filter((item) => {
+    const normalizedStatus = String(item.status || "unknown")
+      .trim()
+      .toLowerCase();
+    const query = search.trim().toLowerCase();
+    const matchesStatus =
+      statusFilter === "all" || normalizedStatus === statusFilter;
+    const matchesSearch =
+      !query ||
+      [item.id, item.type, item.status, item.error]
+        .some((value) => String(value || "").toLowerCase().includes(query));
+
+    return matchesStatus && matchesSearch;
+  });
 
   return (
     <main className="mx-auto max-w-[1440px] space-y-7 px-4 py-7 text-base-content sm:px-6 lg:px-9 lg:py-10">
@@ -303,13 +317,20 @@ export default function JobsPage() {
           </button>
         </div>
 
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-base-content">
-          Submit background jobs and track their real status, processing
-          attempts, completion times, and failures.
-        </p>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <p className="max-w-2xl text-sm leading-6 text-base-content">
+            Submit welcome jobs and monitor their queue status, processing
+            attempts, completion, and failures.
+          </p>
+          <p className="text-xs text-base-content/50">
+            {lastUpdated
+              ? `Last refreshed ${formatDate(lastUpdated)} · Auto-refresh every 30 seconds`
+              : "Waiting for the first history refresh"}
+          </p>
+        </div>
       </header>
 
-      <section className="grid gap-3 sm:grid-cols-3">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-2xl border border-base-300 bg-base-100 p-4 shadow-sm">
           <div className="flex items-center gap-2 text-sm text-base-content">
             <CalendarClock size={16} />
@@ -338,11 +359,22 @@ export default function JobsPage() {
           <p className="mt-3 text-3xl font-semibold tabular-nums">
             {loadingHistory ? "—" : completedCount}
           </p>
-          {!loadingHistory && failedCount > 0 && (
-            <p className="mt-1 text-xs text-error">
-              {failedCount} failed {failedCount === 1 ? "job" : "jobs"}
-            </p>
-          )}
+          <p className="mt-1 text-xs text-base-content/50">
+            Successfully finished
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-base-300 bg-base-100 p-4 shadow-sm">
+          <div className="flex items-center gap-2 text-sm text-base-content">
+            <XCircle size={16} />
+            Failed
+          </div>
+          <p className="mt-3 text-3xl font-semibold tabular-nums">
+            {loadingHistory ? "—" : failedCount}
+          </p>
+          <p className="mt-1 text-xs text-base-content/50">
+            Terminal failures in this history
+          </p>
         </div>
       </section>
 
@@ -459,12 +491,47 @@ export default function JobsPage() {
           <div>
             <h2 className="text-lg font-semibold">Job history</h2>
             <p className="mt-1 text-sm text-base-content/60">
-              Your most recent 50 jobs, scoped to your account.
+              Latest 50 jobs for your account. Counts above reflect this fetched history.
             </p>
           </div>
           <span className="rounded-lg bg-base-200 px-3 py-1.5 text-xs font-medium text-base-content/60">
-            {history.length} {history.length === 1 ? "job" : "jobs"}
+            {filteredJobs.length} of {history.length} shown
           </span>
+        </div>
+
+        <div className="grid gap-3 border-b border-base-300 bg-base-200/20 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_220px] sm:px-7">
+          <label className="relative block">
+            <span className="sr-only">Search job history</span>
+            <Search
+              size={16}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40"
+            />
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search ID, type, status, or error..."
+              className="min-h-11 w-full rounded-xl border border-base-300 bg-base-100 py-2 pl-10 pr-3 text-sm outline-none transition placeholder:text-base-content/40 focus:border-primary focus:ring-2 focus:ring-primary/15"
+            />
+          </label>
+          <label className="relative block">
+            <span className="sr-only">Filter jobs by status</span>
+            <SlidersHorizontal
+              size={15}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40"
+            />
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+              className="min-h-11 w-full appearance-none rounded-xl border border-base-300 bg-base-100 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
+            >
+              <option value="all">All statuses</option>
+              <option value="queued">Queued</option>
+              <option value="processing">Processing</option>
+              <option value="completed">Completed</option>
+              <option value="failed">Failed</option>
+            </select>
+          </label>
         </div>
 
         {historyError && (
@@ -502,9 +569,29 @@ export default function JobsPage() {
               details will appear here.
             </p>
           </div>
-        ) : history.length > 0 ? (
+        ) : history.length > 0 && filteredJobs.length === 0 ? (
+          <div className="px-5 py-14 text-center sm:px-7">
+            <span className="mx-auto grid size-11 place-items-center rounded-xl bg-base-200 text-base-content/50">
+              <Search size={20} />
+            </span>
+            <h3 className="mt-3 font-semibold">No matching jobs</h3>
+            <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-base-content/60">
+              Try another search term or status filter.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                setStatusFilter("all");
+              }}
+              className="mt-3 text-sm font-semibold text-primary hover:underline"
+            >
+              Clear filters
+            </button>
+          </div>
+        ) : filteredJobs.length > 0 ? (
           <div className="divide-y divide-base-300">
-            {history.map((item) => (
+            {filteredJobs.map((item) => (
               <article
                 key={item.id}
                 className="space-y-4 px-5 py-5 transition hover:bg-base-200/30 sm:px-7"
@@ -523,10 +610,14 @@ export default function JobsPage() {
 
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-xl bg-base-200/60 p-3">
-                    <p className="text-xs text-base-content/50">Attempts</p>
+                    <p className="text-xs text-base-content/50">
+                      Processing attempts
+                    </p>
                     <p className="mt-1 text-sm font-semibold tabular-nums">
                       {Number.isFinite(Number(item.attempt))
-                        ? item.attempt
+                        ? Number(item.attempt) === 0
+                          ? "Not started"
+                          : item.attempt
                         : "—"}
                     </p>
                   </div>
@@ -569,7 +660,7 @@ export default function JobsPage() {
 
         <div className="flex items-center justify-between gap-3 border-t border-base-300 bg-base-200/30 px-5 py-3 sm:px-7">
           <p className="text-xs text-base-content/50">
-            History is refreshed when you submit a job or request a refresh.
+            History refreshes automatically every 30 seconds and after submission.
           </p>
           <button
             type="button"

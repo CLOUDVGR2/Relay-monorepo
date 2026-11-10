@@ -51,9 +51,9 @@ describe("Sidebar", () => {
     expect(state.getUsers).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the contact count and online count", () => {
+  it("shows the workspace people count and online count", () => {
     render(<Sidebar />);
-    expect(screen.getByText("3 contacts")).toBeInTheDocument();
+    expect(screen.getByText("3 people in your workspace")).toBeInTheDocument();
     expect(screen.getByText("2 online")).toBeInTheDocument();
   });
 
@@ -73,6 +73,24 @@ describe("Sidebar", () => {
     expect(screen.getByRole("button", { name: /Sam Lee/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Alex Morgan/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Jordan Kim/ })).not.toBeInTheDocument();
+  });
+
+  it("clears the contact search and restores all contacts", async () => {
+    const user = userEvent.setup();
+    render(<Sidebar />);
+
+    const search = screen.getByRole("searchbox", { name: "Search contacts" });
+    await user.type(search, "alex");
+
+    expect(screen.getByRole("button", { name: /Alex Morgan/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Sam Lee/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Clear contact search" }));
+
+    expect(search).toHaveValue("");
+    expect(screen.getByRole("button", { name: /Alex Morgan/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Sam Lee/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Jordan Kim/ })).toBeInTheDocument();
   });
 
   it("trims search whitespace and supports partial matches", async () => {

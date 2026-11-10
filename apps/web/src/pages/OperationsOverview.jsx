@@ -5,6 +5,10 @@ import { Link } from "react-router-dom";
 import { Badge, Card } from "../components/ui";
 import IncidentResponsePanel from "./IncidentResponsePanel";
 import {
+  countCompletedHealthChecks,
+  getPlatformHealthSummary,
+} from "./operations-overview.utils";
+import {
   Activity,
   ArrowDownRight,
   ArrowRight,
@@ -38,10 +42,25 @@ const HEALTH_CHECKS = [
   },
 ];
 
+const GATEWAY_HEALTH_CHECK = {
+  id: "gateway",
+  url: "/gateway/healthz",
+};
+
+const WORKER_DEFINITIONS = [
+  { id: "goWorker", name: "go-worker" },
+  { id: "recordingWorker", name: "recording-worker" },
+  { id: "multiAgentWorker", name: "multi-agent-worker" },
+];
+
+const DATA_SERVICE_IDS = ["mongo", "postgres", "redis", "rabbitmq"];
+
 const INITIAL_HEALTH = Object.fromEntries(
   [
+    GATEWAY_HEALTH_CHECK.id,
     ...HEALTH_CHECKS.map(({ id }) => id),
-    "worker",
+    ...WORKER_DEFINITIONS.map(({ id }) => id),
+    ...DATA_SERVICE_IDS,
     "dataLayer",
   ].map((id) => [
     id,
@@ -64,12 +83,41 @@ const buildMetrics = (queuedJobs) => [
 ];
 
 const services = [
-  { name: "Express API", detail: "Authentication and messaging", icon: Network, healthId: "express" },
-  { name: "NestJS", detail: "GraphQL and domain services", icon: Activity, healthId: "nestjs" },
-  { name: "Go API", detail: "Job submission and orchestration", icon: Workflow, healthId: "go" },
-  { name: "Go Worker", detail: "Background workload processing and heartbeat", icon: Zap, healthId: "worker" },
-  { name: "Python AI", detail: "AI inference and retrieval", icon: Bot, healthId: "python" },
-  { name: "Data layer", detail: "MongoDB, PostgreSQL, Redis and RabbitMQ", icon: Database, healthId: "dataLayer" },
+  { name: "Relay Gateway", detail: "Reverse proxy and API routing", icon: Network, healthId: "gateway", category: "Gateway" },
+  { name: "Express API", detail: "Authentication and messaging", icon: Network, healthId: "express", category: "APIs" },
+  { name: "NestJS API", detail: "GraphQL services and MongoDB readiness", icon: Activity, healthId: "nestjs", category: "APIs" },
+  { name: "Go API", detail: "Job submission and RabbitMQ publisher", icon: Workflow, healthId: "go", category: "APIs" },
+  { name: "Python AI", detail: "AI service and PostgreSQL readiness", icon: Bot, healthId: "python", category: "APIs" },
+  { name: "Go Jobs Worker", detail: "RabbitMQ job consumption and Redis heartbeat", icon: Zap, healthId: "goWorker", category: "Workers" },
+  { name: "Recording Worker", detail: "Background call-recording processing", icon: Activity, healthId: "recordingWorker", category: "Workers" },
+  { name: "Multi-Agent Worker", detail: "Background multi-agent task execution", icon: Bot, healthId: "multiAgentWorker", category: "Workers" },
+  { name: "MongoDB", detail: "Database readiness through NestJS", icon: Database, healthId: "mongo", category: "Data services" },
+  { name: "PostgreSQL", detail: "Database readiness through Python AI", icon: Database, healthId: "postgres", category: "Data services" },
+  { name: "Redis", detail: "Dedicated Redis dependency probe", icon: Database, healthId: "redis", category: "Data services" },
+  { name: "RabbitMQ", detail: "Dedicated RabbitMQ publisher probe", icon: Network, healthId: "rabbitmq", category: "Data services" },
+];
+
+const serviceGroups = [
+  {
+    name: "Gateway",
+    description: "External traffic routing",
+    services: services.filter((service) => service.category === "Gateway"),
+  },
+  {
+    name: "APIs",
+    description: "Application and AI service endpoints",
+    services: services.filter((service) => service.category === "APIs"),
+  },
+  {
+    name: "Workers",
+    description: "Background processing and execution",
+    services: services.filter((service) => service.category === "Workers"),
+  },
+  {
+    name: "Data services",
+    description: "Databases, cache, and messaging",
+    services: services.filter((service) => service.category === "Data services"),
+  },
 ];
 
 const shortcuts = [
@@ -119,7 +167,7 @@ function MetricCard({ metric }) {
   const Icon = metric.icon;
 
   return (
-    <article className="relay-panel group relative overflow-hidden rounded-2xl p-5 transition duration-300 hover:-translate-y-0.5 hover:border-primary/30">
+    <article className="relay-panel relative overflow-hidden rounded-2xl p-5">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-base-content/65">{metric.label}</p>
@@ -133,8 +181,7 @@ function MetricCard({ metric }) {
         <span className="size-1.5 rounded-full bg-base-content/30" />
         <p className="text-xs text-base-content/45">{metric.detail}</p>
       </div>
-      <div className="absolute inset-x-5 bottom-0 h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent opacity-0 transition group-hover:opacity-100" />
-    </article>
+     </article>
   );
 }
 
@@ -227,7 +274,13 @@ export default function OperationsOverview() {
     setHealthStatuses((previous) => ({
       ...previous,
       ...Object.fromEntries(
-        [...HEALTH_CHECKS.map(({ id }) => id), "worker", "dataLayer"].map((id) => [
+        [
+          GATEWAY_HEALTH_CHECK.id,
+          ...HEALTH_CHECKS.map(({ id }) => id),
+          ...WORKER_DEFINITIONS.map(({ id }) => id),
+          ...DATA_SERVICE_IDS,
+          "dataLayer",
+        ].map((id) => [
           id,
           { ...previous[id], status: "checking", detail: "Checking health…" },
         ]),
@@ -298,6 +351,65 @@ export default function OperationsOverview() {
       }
     };
 
+    const checkDependency = async (id, url, identityKey, identityValue) => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4000);
+
+      try {
+        const response = await fetch(url, {
+          method: "GET",
+          signal: controller.signal,
+          headers: { Accept: "application/json" },
+        });
+        const data = await response.json().catch(() => null);
+        const identityMatches = data?.[identityKey] === identityValue;
+
+        if (
+          response.ok &&
+          data?.status === "ready" &&
+          identityMatches
+        ) {
+          return {
+            id,
+            status: "online",
+            detail: `${id === "redis" ? "Redis" : "RabbitMQ"} dependency check passed.`,
+            data,
+          };
+        }
+
+        if (
+          response.status === 503 &&
+          data?.status === "unavailable" &&
+          identityMatches
+        ) {
+          return {
+            id,
+            status: "unavailable",
+            detail: `${id === "redis" ? "Redis" : "RabbitMQ"} reported unavailable.`,
+            data,
+          };
+        }
+
+        return {
+          id,
+          status: "unverified",
+          detail: "Dependency response did not confirm readiness or an explicit unavailable state.",
+          data,
+        };
+      } catch (error) {
+        return {
+          id,
+          status: "unverified",
+          detail: error.name === "AbortError"
+            ? "Dependency check timed out; availability could not be verified."
+            : "Could not verify dependency availability from the browser. Check service availability and CORS.",
+          data: null,
+        };
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
+
     try {
       const apiResults = await Promise.all(
         HEALTH_CHECKS.map(({ id, url }) =>
@@ -312,78 +424,155 @@ export default function OperationsOverview() {
 
       const apiById = Object.fromEntries(apiResults.map((result) => [result.id, result]));
 
-      const [redis, rabbitmq] = await Promise.all([
+      const [gateway, redis, rabbitmq] = await Promise.all([
         checkEndpoint(
-          "redis",
-          "/api/health/redis",
-          (data) => data?.status === "ready" && data?.dependency === "redis",
+          GATEWAY_HEALTH_CHECK.id,
+          GATEWAY_HEALTH_CHECK.url,
+          (data) => ["ok", "ready"].includes(data?.status),
         ),
-        checkEndpoint(
-          "rabbitmq",
-          "/rabbitmqz",
-          (data) => data?.status === "ready" && data?.service === "rabbitmq",
-        ),
+        checkDependency("redis", "/api/health/redis", "dependency", "redis"),
+        checkDependency("rabbitmq", "/rabbitmqz", "service", "rabbitmq"),
       ]);
 
       const nest = apiById.nestjs;
       const python = apiById.python;
-      const go = apiById.go;
 
-      const mongoStatus =
-        nest?.status === "online"
+      const mongo = {
+        status: nest?.status === "online"
           ? "online"
           : nest?.data?.checks?.database === "unavailable"
             ? "unavailable"
-            : "unverified";
+            : "unverified",
+        detail: nest?.status === "online"
+          ? "MongoDB readiness confirmed through NestJS."
+          : "MongoDB could not be independently confirmed because NestJS readiness did not pass.",
+      };
 
-      const postgresStatus =
-        python?.status === "online"
-          ? "online"
-          : python?.data?.detail === "Database unavailable"
-            ? "unavailable"
-            : "unverified";
+      const postgres = {
+        status: python?.status === "online" ? "online" : "unverified",
+        detail: python?.status === "online"
+          ? "PostgreSQL SELECT 1 passed through Python AI readiness."
+          : "PostgreSQL could not be confirmed through Python AI readiness. This does not by itself prove PostgreSQL is down.",
+      };
 
-      const dependencyStates = [
-        mongoStatus,
-        postgresStatus,
-        redis.status,
-        rabbitmq.status,
-      ];
+      const workerStatuses = {};
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
 
-      const dataLayerStatus = dependencyStates.includes("unavailable")
+        try {
+          const response = await fetch("/go/worker-health", {
+            method: "GET",
+            signal: controller.signal,
+            headers: { Accept: "application/json" },
+          });
+          const data = await response.json().catch(() => null);
+
+          if (!response.ok || !Array.isArray(data?.workers)) {
+            throw new Error(
+              `Worker health endpoint returned HTTP ${response.status} or an invalid response.`,
+            );
+          }
+
+          const workersByName = new Map(
+            data.workers.map((worker) => [worker.worker, worker]),
+          );
+          const knownStatuses = new Set([
+            "online", "idle", "processing", "starting", "degraded",
+            "stopping", "stale", "missing", "unknown",
+          ]);
+
+          for (const definition of WORKER_DEFINITIONS) {
+            const worker = workersByName.get(definition.name);
+
+            if (!worker) {
+              workerStatuses[definition.id] = {
+                status: "unknown",
+                detail: "Worker was not included in the health snapshot.",
+              };
+              continue;
+            }
+
+            const status = knownStatuses.has(worker.status)
+              ? worker.status
+              : "unknown";
+            const observations = [];
+
+            if (worker.updated_at) {
+              const updatedAt = new Date(worker.updated_at);
+              observations.push(
+                Number.isNaN(updatedAt.getTime())
+                  ? `Heartbeat timestamp: ${worker.updated_at}`
+                  : `Heartbeat updated ${updatedAt.toLocaleString()}`,
+              );
+            }
+
+            if (worker.last_poll_at) {
+              const lastPoll = new Date(worker.last_poll_at);
+              observations.push(
+                Number.isNaN(lastPoll.getTime())
+                  ? `Last poll: ${worker.last_poll_at}`
+                  : `Last completed poll ${lastPoll.toLocaleString()}`,
+              );
+            }
+
+            if (worker.last_poll_error) {
+              observations.push(`Last poll error: ${worker.last_poll_error}`);
+            }
+
+            workerStatuses[definition.id] = {
+              status,
+              detail: observations.length
+                ? observations.join(" · ")
+                : `Worker heartbeat status: ${status}.`,
+            };
+          }
+        } finally {
+          clearTimeout(timeout);
+        }
+      } catch (error) {
+        const detail = error.name === "AbortError"
+          ? "Worker health snapshot timed out; worker states are unverified."
+          : `Worker health snapshot could not be retrieved: ${error.message || "request failed"}`;
+
+        for (const definition of WORKER_DEFINITIONS) {
+          workerStatuses[definition.id] = {
+            status: "unverified",
+            detail,
+          };
+        }
+      }
+
+      const dependencyStatuses = {
+        mongo,
+        postgres,
+        redis,
+        rabbitmq,
+      };
+      const dependencyValues = Object.values(dependencyStatuses);
+      const dataLayerStatus = dependencyValues.some(
+        (dependency) => dependency.status === "unavailable",
+      )
         ? "unavailable"
-        : dependencyStates.every((status) => status === "online")
+        : dependencyValues.every(
+            (dependency) => dependency.status === "online",
+          )
           ? "online"
-          : dependencyStates.includes("checking")
-            ? "checking"
-            : "unverified";
-
-      const workerStatus =
-        go?.status === "online" ? "online" : "unverified";
-
-      const derivedResults = [
-        {
-          id: "worker",
-          status: workerStatus,
-          detail: go?.status === "online"
-            ? "Go readiness passed, including the worker heartbeat."
-            : "Worker readiness could not be confirmed through the Go API.",
-        },
-        {
-          id: "dataLayer",
-          status: dataLayerStatus,
-          detail: `MongoDB: ${mongoStatus}; PostgreSQL: ${postgresStatus}; Redis: ${redis.status}; RabbitMQ: ${rabbitmq.status}.`,
-        },
-      ];
+          : "unverified";
 
       setHealthStatuses((previous) => ({
         ...previous,
         ...Object.fromEntries(
-          [...apiResults, ...derivedResults].map(({ id, ...result }) => [
-            id,
-            result,
-          ]),
+          [...apiResults, gateway].map(({ id, ...result }) => [id, result]),
         ),
+        ...workerStatuses,
+        ...Object.fromEntries(
+          Object.entries(dependencyStatuses).map(([id, result]) => [id, result]),
+        ),
+        dataLayer: {
+          status: dataLayerStatus,
+          detail: `MongoDB: ${mongo.status}; PostgreSQL: ${postgres.status}; Redis: ${redis.status}; RabbitMQ: ${rabbitmq.status}.`,
+        },
       }));
 
       setHealthLastChecked(new Date());
@@ -404,44 +593,33 @@ export default function OperationsOverview() {
     ({ id }) => healthStatuses[id]?.status === "online",
   ).length;
 
-  const completedChecks = HEALTH_CHECKS.filter(
-    ({ id }) =>
-      ["online", "unavailable"].includes(healthStatuses[id]?.status),
-  ).length;
-
   const platformHealthIds = [
+    GATEWAY_HEALTH_CHECK.id,
     ...HEALTH_CHECKS.map(({ id }) => id),
-    "worker",
-    "dataLayer",
+    ...WORKER_DEFINITIONS.map(({ id }) => id),
+    ...DATA_SERVICE_IDS,
   ];
 
-  const platformStates = platformHealthIds.map(
-    (id) => healthStatuses[id]?.status,
+  const completedChecks = countCompletedHealthChecks(
+    healthStatuses,
+    HEALTH_CHECKS.map(({ id }) => id),
   );
 
-  const allPlatformHealthy = platformStates.every(
-    (status) => status === "online",
+  const platformStatus = getPlatformHealthSummary(
+    Object.fromEntries(
+      platformHealthIds.map((id) => {
+        const status = healthStatuses[id]?.status;
+        const normalizedStatus = ["idle", "processing"].includes(status)
+          ? "online"
+          : ["degraded", "stale", "missing"].includes(status)
+            ? "unavailable"
+            : ["starting", "stopping", "unknown"].includes(status)
+              ? "unverified"
+              : status;
+        return [id, normalizedStatus];
+      }),
+    ),
   );
-
-  const hasUnavailableApi = platformStates.includes("unavailable");
-
-  const platformStatus = allPlatformHealthy
-    ? {
-        label: "Everything is up and running",
-        detail: "All six platform service checks passed.",
-        tone: "success",
-      }
-    : hasUnavailableApi
-      ? {
-          label: "Some services need attention",
-          detail: `${platformStates.filter((status) => status === "online").length} of six platform checks passed. Inspect the service details below.`,
-          tone: "warning",
-        }
-      : {
-          label: "Checking platform health",
-          detail: "Some checks are pending or could not be verified from the browser.",
-          tone: "pending",
-        };
 
   return (
     <div className="mx-auto max-w-[1600px] space-y-7 p-4 sm:space-y-9 sm:p-6 lg:p-8">
@@ -529,7 +707,7 @@ export default function OperationsOverview() {
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-base-content/10 px-6 py-4 text-xs text-base-content/50 sm:px-9">
           <span className="flex items-center gap-2">
             <span className="size-2 rounded-full bg-primary" />
-            Live API health checks · 30-second refresh
+            Automated service health checks · refresh every 30 seconds
           </span>
           <span className="font-mono tracking-wide">RELAY / CONTROL PLANE</span>
         </div>
@@ -553,7 +731,7 @@ export default function OperationsOverview() {
                 ? "bg-success"
                 : platformStatus.tone === "warning"
                   ? "bg-warning"
-                  : "animate-pulse bg-primary"
+                  : `${healthRefreshing ? "animate-pulse " : ""}bg-primary`
             }`}
           />
           <div>
@@ -601,58 +779,83 @@ export default function OperationsOverview() {
             </Link>
           </SectionTitle>
 
-          <div className="divide-y divide-base-300/70">
-            {services.map(({ name, detail, icon: Icon, healthId }, index) => {
-              const health = healthId ? healthStatuses[healthId] : null;
-              const label =
-                health?.status === "online"
-                  ? "Responding"
-                  : health?.status === "unavailable"
-                    ? "Unavailable"
-                    : health?.status === "checking"
-                      ? "Checking"
-                      : "Unverified";
-              const badgeVariant =
-                health?.status === "online"
-                  ? "success"
-                  : health?.status === "unavailable"
-                    ? "warning"
-                    : "neutral";
-
-              return (
-              <div key={name} className="group flex items-center gap-3 py-4 first:pt-1 last:pb-1">
-                <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-base-300/70 bg-base-200/70 text-base-content/65 transition group-hover:border-primary/25 group-hover:text-primary">
-                  <Icon size={18} strokeWidth={1.8} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold">{name}</p>
-                  <p className="mt-1 text-xs leading-5 text-base-content/50">{detail}</p>
+          <div className="grid gap-4 md:grid-cols-2">
+            {serviceGroups.map(({ name: groupName, description, services: groupServices }) => (
+              <section
+                key={groupName}
+                aria-label={`${groupName} services`}
+                className="min-w-0 rounded-2xl border border-base-300/70 bg-base-200/20 p-4 sm:p-5"
+              >
+                <div className="mb-2 flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold tracking-tight">{groupName}</h3>
+                    <p className="mt-1 text-xs text-base-content/45">{description}</p>
+                  </div>
+                  <span className="rounded-full border border-base-300 bg-base-100 px-2.5 py-1 font-mono text-[10px] text-base-content/55">
+                    {String(groupServices.length).padStart(2, "0")}
+                  </span>
                 </div>
-                <Badge
-                  variant={badgeVariant}
-                  size="sm"
-                  dot
-                  className="shrink-0 rounded-full border border-base-300 px-2.5 py-1.5 text-[10px] text-base-content/50"
-                >
-                  {label}
-                </Badge>
-                <span className="hidden font-mono text-[10px] text-base-content/30 sm:block">
-                  {String(index + 1).padStart(2, "0")}
-                </span>
-              </div>
-              );
-            })}
+
+                <div className="divide-y divide-base-300/60">
+                  {groupServices.map(({ name, detail, icon: Icon, healthId }) => {
+                    const health = healthStatuses[healthId];
+                    const rawStatus = health?.status || "checking";
+                    const label = rawStatus === "online"
+                      ? "Online"
+                      : rawStatus === "unavailable"
+                        ? "Unavailable"
+                        : rawStatus === "unverified"
+                          ? "Unverified"
+                          : rawStatus === "checking"
+                            ? "Checking"
+                            : rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1);
+                    const badgeVariant = ["online", "idle", "processing"].includes(rawStatus)
+                      ? "success"
+                      : ["unavailable", "missing", "degraded", "stale"].includes(rawStatus)
+                        ? "warning"
+                        : "neutral";
+
+                    return (
+                      <div key={healthId} className="flex min-w-0 items-start gap-3 py-3 first:pt-2 last:pb-1">
+                        <span className="grid size-9 shrink-0 place-items-center rounded-lg border border-base-300/70 bg-base-100/70 text-base-content/65">
+                          <Icon size={17} strokeWidth={1.8} />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold">{name}</p>
+                          <p className="mt-1 text-xs leading-5 text-base-content/50">{detail}</p>
+                          {health?.detail ? (
+                            <p className="mt-1 break-words text-[11px] leading-5 text-base-content/40">
+                              {health.detail}
+                            </p>
+                          ) : null}
+                        </div>
+                        <Badge
+                          variant={badgeVariant}
+                          size="sm"
+                          dot
+                          className="mt-0.5 shrink-0 rounded-full border border-base-300 px-2 py-1 text-[10px] text-base-content/55"
+                        >
+                          {label}
+                        </Badge>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
           </div>
 
           <div className="mt-5 flex items-start gap-3 rounded-xl border border-base-300/70 bg-base-200/40 p-4">
             <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-base-content/40" />
             <p className="text-xs leading-5 text-base-content/55">
               {completedChecks} of four HTTP API checks have completed.
-              Worker readiness is inferred from the Go API heartbeat; the data
-              layer combines MongoDB, PostgreSQL, Redis and RabbitMQ checks.
+              The gateway is checked separately. Three workers are reported by
+              the worker-health snapshot. MongoDB and PostgreSQL are verified
+              through their respective API readiness checks; Redis and RabbitMQ
+              use dedicated probes.
               {healthLastChecked
                 ? ` Last checked at ${healthLastChecked.toLocaleTimeString()}.`
-                : ""} Browser CORS restrictions can prevent dependency checks
+                : ""} Browser CORS restrictions can prevent endpoint checks
               from being verified.
             </p>
           </div>

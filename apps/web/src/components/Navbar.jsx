@@ -4,6 +4,7 @@ import { Link, NavLink } from "react-router-dom";
 import { useAuthStore } from "../store/useAuthStore";
 import {
   Activity,
+  Command,
   LogOut,
   MessageCircle,
   Settings,
@@ -30,9 +31,9 @@ const Navbar = () => {
           className="flex shrink-0 items-center gap-2.5 rounded-lg transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           <span className="grid size-9 place-items-center rounded-xl bg-primary text-primary-content shadow-sm">
-            <MessageCircle className="size-5" aria-hidden="true" />
+            <Command className="size-5 text-blue-300" aria-hidden="true" />
           </span>
-          <span className="text-xl font-bold tracking-tight">Relay</span>
+          <span className="text-xl font-bold tracking-tight">Relay<span className="text-blue-300">.</span></span>
           <span className="ml-1 hidden rounded-md border border-base-300 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-base-content/45 xl:inline">
             Intelligence
           </span>

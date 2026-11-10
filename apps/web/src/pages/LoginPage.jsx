@@ -44,7 +44,7 @@ export default function LoginPage() {
             <span className="grid size-10 place-items-center rounded-xl border border-white/10 bg-white/[0.06] shadow-[0_0_30px_rgba(59,130,246,0.14)] transition group-hover:border-blue-400/40">
               <Command size={21} className="text-blue-300" />
             </span>
-            <span className="text-lg font-semibold tracking-tight">relay<span className="text-blue-300">.</span></span>
+            <span className="text-lg font-semibold tracking-tight">Relay<span className="text-blue-300">.</span></span>
           </Link>
           <div className="hidden items-center gap-2 text-xs text-slate-400 sm:flex">
             <ShieldCheck size={15} className="text-emerald-400" />

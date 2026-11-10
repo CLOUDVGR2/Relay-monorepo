@@ -59,11 +59,11 @@ describe("ChatHeader", () => {
     expect(screen.getByText("Active now")).toBeInTheDocument();
   });
 
-  it("shows away status for an offline user", () => {
+  it("shows offline status for an offline user", () => {
     state.selectedUser = { _id: "u1", fullName: "Alex" };
     state.onlineUsers = [];
     render(<ChatHeader />);
-    expect(screen.getByText("Away")).toBeInTheDocument();
+    expect(screen.getByText("Offline")).toBeInTheDocument();
   });
 
   it("uses the user's profile image when provided", () => {

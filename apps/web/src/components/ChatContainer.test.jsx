@@ -165,10 +165,10 @@ describe("ChatContainer", () => {
     render(<ChatContainer />);
 
     expect(
-      screen.getByRole("log", { name: "Messages with contact" }),
+      screen.getByRole("log", { name: "Messages with Contact" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Say hello to your contact/),
+      screen.getByText(/Say hello to\s*Contact/),
     ).toBeInTheDocument();
   });
 
@@ -198,7 +198,7 @@ describe("ChatContainer", () => {
     }];
     render(<ChatContainer />);
 
-    expect(screen.getByRole("log", { name: "Messages with contact" })).toBeInTheDocument();
+    expect(screen.getByRole("log", { name: "Messages with Contact" })).toBeInTheDocument();
     expect(screen.getByText("Contact")).toBeInTheDocument();
     expect(document.querySelector('img[src="/avatar.png"]')).toBeInTheDocument();
   });

@@ -48,10 +48,25 @@ const SERVICES = [
     icon: Server,
   },
   {
-    id: "worker",
-    title: "Go Worker",
-    description: "RabbitMQ and Redis background processing",
+    id: "goWorker",
+    workerName: "go-worker",
+    title: "Go Jobs Worker",
+    description: "RabbitMQ job consumption and Redis heartbeat",
     icon: ArrowUpRight,
+  },
+  {
+    id: "recordingWorker",
+    workerName: "recording-worker",
+    title: "Recording Worker",
+    description: "Background call-recording processing",
+    icon: Activity,
+  },
+  {
+    id: "multiAgentWorker",
+    workerName: "multi-agent-worker",
+    title: "Multi-Agent Worker",
+    description: "Background multi-agent task execution",
+    icon: Activity,
   },
   {
     id: "python",
@@ -63,6 +78,66 @@ const SERVICES = [
   },
 ];
 
+const DATA_SERVICES = [
+  {
+    id: "database",
+    title: "MongoDB",
+    description: "Database connectivity through NestJS readiness",
+    icon: Server,
+  },
+  {
+    id: "postgres",
+    title: "PostgreSQL",
+    description: "Database connectivity through Python AI readiness",
+    icon: Server,
+  },
+  {
+    id: "redis",
+    title: "Redis",
+    description: "Dedicated cache connectivity probe",
+    icon: Activity,
+  },
+  {
+    id: "rabbitmq",
+    title: "RabbitMQ",
+    description: "Dedicated message publisher probe",
+    icon: Activity,
+  },
+];
+
+const SERVICE_INVENTORY = [...SERVICES, ...DATA_SERVICES];
+
+const SERVICE_GROUPS = [
+  {
+    id: "gateway",
+    title: "Gateway",
+    description: "External traffic routing",
+    serviceIds: ["gateway"],
+  },
+  {
+    id: "apis",
+    title: "APIs",
+    description: "Application and AI service endpoints",
+    serviceIds: ["express", "nestjs", "go", "python"],
+  },
+  {
+    id: "workers",
+    title: "Workers",
+    description: "Background processing and execution",
+    serviceIds: ["goWorker", "recordingWorker", "multiAgentWorker"],
+  },
+  {
+    id: "data",
+    title: "Data services",
+    description: "Databases, cache, and messaging",
+    serviceIds: ["database", "postgres", "redis", "rabbitmq"],
+  },
+];
+
+const SERVICE_BY_ID = Object.fromEntries(
+  SERVICE_INVENTORY.map((service) => [service.id, service]),
+);
+
 const INITIAL_STATUSES = Object.fromEntries(
   SERVICES.map((service) => [
     service.id,
@@ -70,8 +145,8 @@ const INITIAL_STATUSES = Object.fromEntries(
       status: "checking",
       detail: service.url
         ? "Waiting for health check."
-        : service.id === "worker"
-          ? "No direct health endpoint is configured; process state alone does not confirm job consumption."
+        : service.workerName
+          ? "Waiting for the worker heartbeat endpoint."
           : "No direct HTTP health endpoint is configured.",
     },
   ]),
@@ -139,13 +214,29 @@ function StatusBadge({ status }) {
     checking: "border-info/25 bg-info/10 text-info",
     unavailable: "border-error/25 bg-error/10 text-error",
     unverified: "border-base-300 bg-base-200 text-base-content",
+    idle: "border-success/25 bg-success/10 text-success",
+    processing: "border-info/25 bg-info/10 text-info",
+    starting: "border-info/25 bg-info/10 text-info",
+    degraded: "border-warning/30 bg-warning/10 text-warning",
+    stopping: "border-warning/30 bg-warning/10 text-warning",
+    stale: "border-warning/30 bg-warning/10 text-warning",
+    missing: "border-error/25 bg-error/10 text-error",
+    unknown: "border-base-300 bg-base-200 text-base-content",
   };
 
   const labels = {
-    online: "Responding",
+    online: "Online",
     checking: "Checking",
     unavailable: "Unavailable",
     unverified: "Unverified",
+    idle: "Idle",
+    processing: "Processing",
+    starting: "Starting",
+    degraded: "Degraded",
+    stopping: "Stopping",
+    stale: "Stale",
+    missing: "Missing",
+    unknown: "Unknown",
   };
 
   return (
@@ -156,13 +247,15 @@ function StatusBadge({ status }) {
     >
       <span
         className={`size-1.5 rounded-full ${
-          status === "online"
+          ["online", "idle"].includes(status)
             ? "bg-success"
-            : status === "checking"
+            : ["checking", "processing", "starting"].includes(status)
               ? "animate-pulse bg-info"
-              : status === "unavailable"
+              : ["unavailable", "missing"].includes(status)
                 ? "bg-error"
-                : "bg-base-content/40"
+                : ["degraded", "stopping", "stale"].includes(status)
+                  ? "bg-warning"
+                  : "bg-base-content/40"
         }`}
       />
       {labels[status] || "Unverified"}
@@ -172,7 +265,7 @@ function StatusBadge({ status }) {
 
 function ServiceCard({ icon: Icon, title, description, status, detail }) {
   return (
-    <article className="group rounded-2xl border border-base-300 bg-base-100 p-5 transition duration-200 hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-lg hover:shadow-primary/5 sm:p-6">
+    <article className="rounded-2xl border border-base-300 bg-base-100 p-5 transition-colors duration-200 sm:p-6">
       <div className="flex items-start justify-between gap-3">
         <div className="grid size-11 place-items-center rounded-xl border border-base-300 bg-base-200/70">
           <Icon size={20} className="text-primary" />
@@ -313,7 +406,6 @@ export default function InfrastructurePage() {
       );
 
       const nestResult = results.find((result) => result.id === "nestjs");
-      const goResult = results.find((result) => result.id === "go");
       const pythonResult = results.find((result) => result.id === "python");
 
       const postgresStatus = pythonResult?.status === "online"
@@ -337,20 +429,97 @@ export default function InfrastructurePage() {
         ),
       ]);
 
-      const workerStatus = goResult?.status === "online"
-        ? {
-            status: "online",
-            detail: "Go API readiness passed, including a fresh Redis worker heartbeat. This verifies worker-session readiness, not successful processing of every job.",
+      const workerStatusById = {};
+      const workerDefinitions = [
+        { id: "goWorker", name: "go-worker" },
+        { id: "recordingWorker", name: "recording-worker" },
+        { id: "multiAgentWorker", name: "multi-agent-worker" },
+      ];
+
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+
+        try {
+          const response = await fetch("/go/worker-health", {
+            method: "GET",
+            signal: controller.signal,
+            headers: { Accept: "application/json" },
+          });
+          const data = await response.json().catch(() => null);
+
+          if (!response.ok || !Array.isArray(data?.workers)) {
+            throw new Error(`Worker health endpoint returned HTTP ${response.status} or an invalid response.`);
           }
-        : goResult?.status === "unavailable"
-          ? {
-              status: "unverified",
-              detail: "Worker readiness could not be confirmed because Go API readiness failed. The cause may be RabbitMQ publishing, the Redis job store, or the worker heartbeat.",
+
+          const workersByName = new Map(
+            data.workers.map((worker) => [worker.worker, worker]),
+          );
+          const knownStatuses = new Set([
+            "online", "idle", "processing", "starting", "degraded",
+            "stopping", "stale", "missing", "unknown",
+          ]);
+
+          for (const definition of workerDefinitions) {
+            const worker = workersByName.get(definition.name);
+
+            if (!worker) {
+              workerStatusById[definition.id] = {
+                status: "unknown",
+                detail: "The worker was not included in the health snapshot.",
+              };
+              continue;
             }
-          : {
-              status: "checking",
-              detail: "Waiting for the Go API readiness check, which also verifies the worker heartbeat.",
+
+            const status = knownStatuses.has(worker.status)
+              ? worker.status
+              : "unknown";
+            const observations = [];
+
+            if (worker.updated_at) {
+              const updatedAt = new Date(worker.updated_at);
+              observations.push(
+                Number.isNaN(updatedAt.getTime())
+                  ? `Heartbeat timestamp: ${worker.updated_at}`
+                  : `Heartbeat updated ${updatedAt.toLocaleString()}`,
+              );
+            }
+
+            if (worker.last_poll_at) {
+              const lastPoll = new Date(worker.last_poll_at);
+              observations.push(
+                Number.isNaN(lastPoll.getTime())
+                  ? `Last poll: ${worker.last_poll_at}`
+                  : `Last completed poll ${lastPoll.toLocaleString()}`,
+              );
+            }
+
+            if (worker.last_poll_error) {
+              observations.push(`Last poll error: ${worker.last_poll_error}`);
+            }
+
+            workerStatusById[definition.id] = {
+              status,
+              detail: observations.length
+                ? observations.join(" · ")
+                : `Worker heartbeat status: ${status}.`,
             };
+          }
+        } finally {
+          clearTimeout(timeout);
+        }
+      } catch (error) {
+        const detail = error.name === "AbortError"
+          ? "Worker health check timed out; process states are unverified."
+          : `Worker health snapshot could not be retrieved: ${error.message || "request failed"}`;
+
+        for (const definition of workerDefinitions) {
+          workerStatusById[definition.id] = {
+            status: "unverified",
+            detail,
+          };
+        }
+      }
 
       setServiceStatuses((previous) => ({
         ...previous,
@@ -360,7 +529,7 @@ export default function InfrastructurePage() {
             { status, detail },
           ]),
         ),
-        worker: workerStatus,
+        ...workerStatusById,
         postgres: postgresStatus,
         redis: redisStatus,
         rabbitmq: rabbitmqStatus,
@@ -380,45 +549,54 @@ export default function InfrastructurePage() {
     return () => clearInterval(intervalId);
   }, [checkHealth]);
 
-  const apiServices = SERVICES.filter(
-    (service) => service.url && service.id !== "gateway",
-  );
+  const serviceHealth = SERVICE_INVENTORY.map((service) => ({
+    id: service.id,
+    status: serviceStatuses[service.id]?.status || "checking",
+  }));
 
-  const respondingCount = apiServices.filter(
-    (service) => serviceStatuses[service.id]?.status === "online",
+  const operationalCount = serviceHealth.filter(({ status }) =>
+    ["online", "idle", "processing"].includes(status),
   ).length;
 
-  const checkedCount = apiServices.filter(
-    (service) =>
-      ["online", "unavailable"].includes(serviceStatuses[service.id]?.status),
+  const attentionCount = serviceHealth.filter(({ status }) =>
+    ["unavailable", "degraded", "stopping", "stale", "missing"].includes(status),
   ).length;
 
-  const allApisHealthy = checkedCount === 4 && respondingCount === 4;
-  const allChecksHealthy =
-    allApisHealthy && serviceStatuses.gateway?.status === "online";
-  const hasUnavailableService = SERVICES.some(
-    (service) =>
-      service.url &&
-      serviceStatuses[service.id]?.status === "unavailable",
-  );
+  const unverifiedCount = serviceHealth.filter(({ status }) =>
+    ["unverified", "unknown"].includes(status),
+  ).length;
+
+  const checkingCount =
+    SERVICE_INVENTORY.length -
+    operationalCount -
+    attentionCount -
+    unverifiedCount;
+
+  const allChecksHealthy = operationalCount === SERVICE_INVENTORY.length;
 
   const platformStatus = allChecksHealthy
     ? {
-        title: "All health checks passed",
-        detail: "All four HTTP APIs and the Relay Gateway are responding to health checks.",
+        title: "All 12 services operational",
+        detail: "Every gateway, API, worker, and data-service check reports an operational state.",
         tone: "success",
       }
-    : hasUnavailableService
+    : attentionCount > 0
       ? {
           title: "Attention required",
-          detail: `${respondingCount} of 4 HTTP APIs are responding. Review the affected API and gateway health cards below.`,
+          detail: `${operationalCount} of 12 services are operational. ${attentionCount} require attention, ${unverifiedCount} are unverified, and ${checkingCount} are still checking.`,
           tone: "warning",
         }
-      : {
-          title: "Monitoring platform health",
-          detail: "The operational status will update as health checks complete.",
-          tone: "pending",
-        };
+      : checkingCount > 0
+        ? {
+            title: "Health checks in progress",
+            detail: `${operationalCount} of 12 services are operational. ${checkingCount} checks are still in progress and ${unverifiedCount} are unverified.`,
+            tone: "pending",
+          }
+        : {
+            title: "Some services remain unverified",
+            detail: `${operationalCount} of 12 services are operational. ${unverifiedCount} could not be conclusively verified; this does not establish that they are down.`,
+            tone: "pending",
+          };
 
   return (
     <div className="mx-auto w-full max-w-[1500px] space-y-7 p-4 sm:p-7 lg:p-10">
@@ -492,19 +670,53 @@ export default function InfrastructurePage() {
         </span>
       </section>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <section
+        aria-label="Infrastructure health summary"
+        className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
+      >
+        <div className="rounded-2xl border border-success/20 bg-base-100 p-5">
+          <div className="flex items-center gap-3">
+            <div className="grid size-10 place-items-center rounded-xl bg-success/10 text-success">
+              <CheckCircle2 size={19} />
+            </div>
+            <span className="text-sm text-base-content/60">Operational</span>
+          </div>
+          <p className="mt-5 text-2xl font-semibold tabular-nums tracking-tight">
+            {operationalCount}
+            <span className="ml-1 text-base font-normal text-base-content/45">/ 12</span>
+          </p>
+          <p className="mt-1 text-xs text-base-content/50">
+            Services reporting an operational state.
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-warning/20 bg-base-100 p-5">
+          <div className="flex items-center gap-3">
+            <div className="grid size-10 place-items-center rounded-xl bg-warning/10 text-warning">
+              <AlertCircle size={19} />
+            </div>
+            <span className="text-sm text-base-content/60">Attention required</span>
+          </div>
+          <p className="mt-5 text-2xl font-semibold tabular-nums tracking-tight">
+            {attentionCount}
+          </p>
+          <p className="mt-1 text-xs text-base-content/50">
+            Confirmed unavailable or degraded states.
+          </p>
+        </div>
+
         <div className="rounded-2xl border border-base-300 bg-base-100 p-5">
           <div className="flex items-center gap-3">
-            <div className="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary">
-              <Server size={19} />
+            <div className="grid size-10 place-items-center rounded-xl bg-base-200 text-base-content/65">
+              <WifiOff size={19} />
             </div>
-            <span className="text-sm text-base-content/55">HTTP APIs responding</span>
+            <span className="text-sm text-base-content/60">Unverified</span>
           </div>
-          <p className="mt-5 text-2xl font-semibold tracking-tight">
-            {respondingCount} <span className="text-base font-normal text-base-content/50">/ 4</span>
+          <p className="mt-5 text-2xl font-semibold tabular-nums tracking-tight">
+            {unverifiedCount}
           </p>
-          <p className="mt-1 text-xs text-base-content/45">
-            {checkedCount} of four API health endpoints checked.
+          <p className="mt-1 text-xs text-base-content/50">
+            Checks without a conclusive service state.
           </p>
         </div>
 
@@ -513,39 +725,34 @@ export default function InfrastructurePage() {
             <div className="grid size-10 place-items-center rounded-xl bg-info/10 text-info">
               <Clock3 size={19} />
             </div>
-            <span className="text-sm text-base-content/55">Last health check</span>
+            <span className="text-sm text-base-content/60">Last health check</span>
           </div>
           <p className="mt-5 text-xl font-semibold tracking-tight">
             {lastChecked ? lastChecked.toLocaleTimeString() : "Checking…"}
           </p>
-          <p className="mt-1 text-xs text-base-content/45">
-            Times reflect checks made by this browser.
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-base-300 bg-base-100 p-5 sm:col-span-2 xl:col-span-1">
-          <div className="flex items-center gap-3">
-            <div className="grid size-10 place-items-center rounded-xl bg-success/10 text-success">
-              <ShieldCheck size={19} />
-            </div>
-            <span className="text-sm text-base-content/55">Microservices</span>
-          </div>
-          <p className="mt-5 text-2xl font-semibold tracking-tight">5</p>
-          <p className="mt-1 text-xs text-base-content/45">
-            Four HTTP APIs and one background worker.
+          <p className="mt-1 text-xs text-base-content/50">
+            {refreshing
+              ? `${checkingCount} checks still in progress.`
+              : "Times reflect checks made by this browser."}
           </p>
         </div>
       </section>
 
-      <section className="space-y-4">
+      <section
+        aria-label="Monitored infrastructure services"
+        className="space-y-8"
+      >
         <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">
               Service inventory
             </p>
             <h2 className="mt-1 text-xl font-semibold tracking-tight">
-              Connected services
+              All 12 monitored services
             </h2>
+            <p className="mt-1 text-sm text-base-content/55">
+              Health and heartbeat observations across the platform.
+            </p>
           </div>
           <p className="text-xs text-base-content/45">
             {lastChecked
@@ -554,48 +761,48 @@ export default function InfrastructurePage() {
           </p>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {SERVICES.map((service) => (
-            <ServiceCard
-              key={service.id}
-              icon={service.icon}
-              title={service.title}
-              description={service.description}
-              status={
-                service.id === "worker"
-                  ? serviceStatuses.worker?.status || "checking"
-                  : service.url
-                    ? serviceStatuses[service.id]?.status || "checking"
-                    : "unverified"
-              }
-              detail={serviceStatuses[service.id]?.detail || "Awaiting health check."}
-            />
-          ))}
-          <ServiceCard
-            icon={Server}
-            title="Data layer"
-            description="MongoDB, PostgreSQL, Redis, and RabbitMQ"
-            status={
-              serviceStatuses.database?.status === "unavailable"
-                ? "unavailable"
-                : [
-                    serviceStatuses.database?.status,
-                    serviceStatuses.postgres?.status,
-                    serviceStatuses.redis?.status,
-                    serviceStatuses.rabbitmq?.status,
-                  ].every((status) => status === "online")
-                  ? "online"
-                  : "unverified"
-            }
-            detail={[
-              `MongoDB: ${serviceStatuses.database?.status || "checking"}`,
-              `PostgreSQL: ${serviceStatuses.postgres?.status || "checking"}`,
-              `Redis: ${serviceStatuses.redis?.status || "checking"}`,
-              `RabbitMQ: ${serviceStatuses.rabbitmq?.status || "checking"}`,
-              "Redis and RabbitMQ are checked through their dedicated HTTP probes.",
-            ].join(" · ")}
-          />
-        </div>
+        {SERVICE_GROUPS.map((group) => (
+          <section key={group.id} aria-labelledby={`service-group-${group.id}`}>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h3
+                  id={`service-group-${group.id}`}
+                  className="text-base font-semibold tracking-tight"
+                >
+                  {group.title}
+                </h3>
+                <p className="mt-1 text-xs text-base-content/50">
+                  {group.description}
+                </p>
+              </div>
+              <span className="shrink-0 rounded-full border border-base-300 bg-base-200/60 px-2.5 py-1 text-xs font-medium tabular-nums text-base-content/65">
+                {group.serviceIds.length}{" "}
+                {group.serviceIds.length === 1 ? "service" : "services"}
+              </span>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {group.serviceIds.map((serviceId) => {
+                const service = SERVICE_BY_ID[serviceId];
+                const status = serviceStatuses[serviceId]?.status || "checking";
+
+                return (
+                  <ServiceCard
+                    key={service.id}
+                    icon={service.icon}
+                    title={service.title}
+                    description={service.description}
+                    status={status}
+                    detail={
+                      serviceStatuses[serviceId]?.detail ||
+                      "Awaiting health check."
+                    }
+                  />
+                );
+              })}
+            </div>
+          </section>
+        ))}
       </section>
 
       <div className="flex items-start gap-3 rounded-2xl border border-base-300 bg-base-200/50 p-4">
@@ -610,18 +817,17 @@ export default function InfrastructurePage() {
             Express, NestJS, Go API, and Python AI are checked independently.
             MongoDB is checked through the NestJS database ping, and PostgreSQL
             through Python AI readiness. Redis and RabbitMQ use dedicated HTTP probes.
-            Go API readiness also checks its publisher, Redis-backed job store,
-            and worker heartbeat. These checks do not guarantee every job succeeds.
+            Go API readiness checks its publisher, Redis-backed job store, and Go
+            worker heartbeat. The separate worker snapshot reports Go Jobs, Recording,
+            and Multi-Agent worker states, including poll timestamps and errors where
+            available. A fresh heartbeat confirms process reporting, not successful
+            completion of every job.
             Browser checks may require each API to allow the frontend origin through CORS.
           </p>
         </div>
       </div>
 
-      {SERVICES.some(
-        (service) =>
-          service.url &&
-          serviceStatuses[service.id]?.status === "unavailable",
-      ) && (
+      {attentionCount > 0 && (
         <div
           role="status"
           className="flex items-start gap-3 rounded-2xl border border-warning/25 bg-warning/5 p-4 text-sm"

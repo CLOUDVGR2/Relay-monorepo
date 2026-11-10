@@ -122,7 +122,42 @@ const App = () => {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
-      <Toaster position="top-right" />
+      <Toaster
+        position="top-right"
+        gutter={12}
+        containerClassName="relay-toaster"
+        containerStyle={{ top: authUser ? 92 : 24, right: 24 }}
+        toastOptions={{
+          duration: 4200,
+          className: "relay-toast",
+          style: {
+            background: "var(--color-base-100)",
+            color: "var(--color-base-content)",
+            borderRadius: "16px",
+            padding: "14px 16px",
+            fontSize: "13px",
+            fontWeight: 500,
+            boxShadow: "0 18px 48px -18px color-mix(in srgb, var(--color-base-content) 24%, transparent)",
+            maxWidth: "min(420px, calc(100vw - 32px))",
+          },
+          success: {
+            duration: 3400,
+            className: "relay-toast relay-toast--success",
+            iconTheme: {
+              primary: "var(--color-success)",
+              secondary: "var(--color-success-content)",
+            },
+          },
+          error: {
+            duration: 7000,
+            className: "relay-toast relay-toast--error",
+            iconTheme: {
+              primary: "var(--color-error)",
+              secondary: "var(--color-error-content)",
+            },
+          },
+        }}
+      />
     </div>
   );
 };

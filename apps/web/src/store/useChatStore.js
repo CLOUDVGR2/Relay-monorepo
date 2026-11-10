@@ -5,6 +5,9 @@ import toast from "react-hot-toast";
 import { axiosInstance } from "../lib/axios";
 import { useAuthStore } from "./useAuthStore";
 
+const getMessageId = (value) =>
+  String(value?._id ?? value ?? "");
+
 export const useChatStore = create((set, get) => ({
   messages: [],
   users: [],
@@ -80,6 +83,8 @@ export const useChatStore = create((set, get) => ({
             olderMessagesCursor: res.headers["x-next-cursor"] || null,
           };
         });
+
+        await get().markMessagesRead(userId);
       }
     } catch (error) {
       if (get().messageRequestId === requestId) {
@@ -206,53 +211,202 @@ export const useChatStore = create((set, get) => ({
     }
   },
 
+  markMessagesRead: async (senderId) => {
+    const selectedId = getMessageId(get().selectedUser);
+    if (!senderId || selectedId !== getMessageId(senderId)) return;
+
+    try {
+      const response = await axiosInstance.post(`/messages/read/${senderId}`);
+      const messageIds = new Set(
+        (response.data?.messageIds ?? []).map(String),
+      );
+      const readAt = response.data?.readAt;
+
+      if (!messageIds.size || !readAt) return;
+
+      if (getMessageId(get().selectedUser) !== selectedId) return;
+
+      set((state) => ({
+        messages: state.messages.map((message) =>
+          messageIds.has(getMessageId(message._id))
+            ? { ...message, readAt }
+            : message
+        ),
+      }));
+    } catch (error) {
+      console.error(
+        "[Messaging] Failed to mark conversation messages as read:",
+        error.response?.data?.message || error.message,
+      );
+    }
+  },
+
+  editMessage: async (messageId, text) => {
+    try {
+      const response = await axiosInstance.patch(
+        `/messages/${messageId}`,
+        { text },
+      );
+
+      const updatedMessage = response.data;
+
+      set((state) => ({
+        messages: state.messages.map((message) =>
+          getMessageId(message._id) === getMessageId(updatedMessage._id)
+            ? updatedMessage
+            : message
+        ),
+      }));
+
+      return updatedMessage;
+    } catch (error) {
+      toast.error(
+        error.response?.data?.message ||
+          "Unable to edit this message. Please try again."
+      );
+      throw error;
+    }
+  },
+
   messageListener: null,
+  messagesReadListener: null,
+  messageUpdatedListener: null,
+  messageSocket: null,
 
   subscribeToMessages: () => {
-    const { selectedUser, messageListener } = get();
+    const {
+      selectedUser,
+      messageListener,
+      messagesReadListener,
+      messageUpdatedListener,
+      messageSocket,
+    } = get();
     const socket = useAuthStore.getState().socket;
+
+    // Remove this store's previous listeners from their original socket.
+    if (messageSocket && messageListener) {
+      messageSocket.off("newMessage", messageListener);
+    }
+    if (messageSocket && messagesReadListener) {
+      messageSocket.off("messagesRead", messagesReadListener);
+    }
+    if (messageSocket && messageUpdatedListener) {
+      messageSocket.off("messageUpdated", messageUpdatedListener);
+    }
+
+    set({
+      messageListener: null,
+      messagesReadListener: null,
+      messageUpdatedListener: null,
+      messageSocket: null,
+    });
 
     if (!selectedUser?._id || !socket) return;
 
-    // Remove only this store's previous listener, if one exists.
-    if (messageListener) {
-      socket.off("newMessage", messageListener);
-    }
-
-    // Read the current selection when an event arrives to avoid stale closures.
     const listener = (newMessage) => {
-      const currentSelectedUser = get().selectedUser;
+      const selectedId = getMessageId(get().selectedUser);
+      const currentUserId = getMessageId(useAuthStore.getState().authUser);
 
       if (
-        !currentSelectedUser?._id ||
-        String(newMessage.senderId) !== String(currentSelectedUser._id)
+        !selectedId ||
+        getMessageId(newMessage?.senderId) !== selectedId ||
+        getMessageId(newMessage?.receiverId) !== currentUserId
       ) {
         return;
       }
 
       set((state) => ({
         messages: state.messages.some(
-          (message) => String(message._id) === String(newMessage._id)
+          (message) => getMessageId(message._id) === getMessageId(newMessage._id)
         )
           ? state.messages
           : [...state.messages, newMessage],
       }));
+
+      // The recipient has the conversation open, so mark this message read.
+      void get().markMessagesRead(selectedId);
+    };
+
+    const readListener = ({ readerId, messageIds, readAt } = {}) => {
+      const selectedId = getMessageId(get().selectedUser);
+      const ids = new Set((messageIds ?? []).map(String));
+
+      // A receipt is relevant only when the selected contact read our messages.
+      if (
+        !selectedId ||
+        getMessageId(readerId) !== selectedId ||
+        !ids.size ||
+        !readAt
+      ) {
+        return;
+      }
+
+      set((state) => ({
+        messages: state.messages.map((message) =>
+          ids.has(getMessageId(message._id))
+            ? { ...message, readAt }
+            : message
+        ),
+      }));
+    };
+
+    const updatedListener = (updatedMessage) => {
+      const selectedId = getMessageId(get().selectedUser);
+      const currentUserId = getMessageId(useAuthStore.getState().authUser);
+      const senderId = getMessageId(updatedMessage?.senderId);
+      const receiverId = getMessageId(updatedMessage?.receiverId);
+
+      const belongsToConversation =
+        (senderId === currentUserId && receiverId === selectedId) ||
+        (senderId === selectedId && receiverId === currentUserId);
+
+      if (!selectedId || !belongsToConversation) return;
+
+      set((state) => ({
+        messages: state.messages.map((message) =>
+          getMessageId(message._id) === getMessageId(updatedMessage._id)
+            ? updatedMessage
+            : message
+        ),
+      }));
     };
 
     socket.on("newMessage", listener);
-    set({ messageListener: listener });
+    socket.on("messagesRead", readListener);
+    socket.on("messageUpdated", updatedListener);
+
+    set({
+      messageListener: listener,
+      messagesReadListener: readListener,
+      messageUpdatedListener: updatedListener,
+      messageSocket: socket,
+    });
   },
 
   unsubscribeFromMessages: () => {
-    const socket = useAuthStore.getState().socket;
-    const listener = get().messageListener;
+    const {
+      messageListener,
+      messagesReadListener,
+      messageUpdatedListener,
+      messageSocket,
+    } = get();
 
-    // Do not remove other components' newMessage listeners.
-    if (socket && listener) {
-      socket.off("newMessage", listener);
+    if (messageSocket && messageListener) {
+      messageSocket.off("newMessage", messageListener);
+    }
+    if (messageSocket && messagesReadListener) {
+      messageSocket.off("messagesRead", messagesReadListener);
+    }
+    if (messageSocket && messageUpdatedListener) {
+      messageSocket.off("messageUpdated", messageUpdatedListener);
     }
 
-    set({ messageListener: null });
+    set({
+      messageListener: null,
+      messagesReadListener: null,
+      messageUpdatedListener: null,
+      messageSocket: null,
+    });
   },
 
   setSelectedUser: (selectedUser) => {
