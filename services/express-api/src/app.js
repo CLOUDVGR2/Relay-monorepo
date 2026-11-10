@@ -10,6 +10,10 @@ import mongoose from "mongoose";
 import path from "node:path";
 import { setupSwagger } from "./swagger.js";
 import { redis } from "./lib/redis.js";
+import {
+  metricsRegistry,
+  prometheusMetricsMiddleware,
+} from "./lib/prometheus-metrics.js";
 
 import authRoutes from "./routes/auth.route.js";
 import messageRoutes from "./routes/message.route.js";
@@ -86,6 +90,19 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
+
+// Prometheus metrics are exposed on the private Docker network.
+app.get("/metrics", async (_req, res, next) => {
+  try {
+    res.set("Content-Type", metricsRegistry.contentType);
+    res.end(await metricsRegistry.metrics());
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Record request counts and latency without collecting URLs or user data.
+app.use(prometheusMetricsMiddleware);
 
 // Permit larger JSON bodies only for the two authenticated image-upload routes.
 // All other JSON requests retain the global 1 MiB limit.

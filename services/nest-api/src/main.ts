@@ -11,6 +11,7 @@ import { setupSwagger } from './openapi/setup-swagger.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 import { RequestContextMiddleware } from './common/middleware/request-context.middleware.js';
 import { RequestTimingInterceptor } from './common/interceptors/request-timing.interceptor.js';
+import { prometheusMetricsMiddleware } from './observability/prometheus-metrics.js';
 
 /**
  * Initializes and starts the NestJS application.
@@ -20,6 +21,9 @@ import { RequestTimingInterceptor } from './common/interceptors/request-timing.i
  */
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
+
+  // Expose Prometheus metrics and record HTTP request counts and latency.
+  app.use(prometheusMetricsMiddleware);
 
   // Allow the configured frontend origin to send authentication cookies.
   const configService = app.get(ConfigService);

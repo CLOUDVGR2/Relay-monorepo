@@ -34,6 +34,10 @@ const API_BASE_URL = (
   (import.meta.env.DEV ? "http://localhost:3000" : window.location.origin)
 ).replace(/\/+$/, "");
 
+const EXPRESS_API_BASE_URL = import.meta.env.MODE === "development"
+  ? "http://localhost:5001/api"
+  : "/api";
+
 const PERIODS = [
   { label: "Today", value: "today" },
   { label: "7 days", value: "7d" },
@@ -62,6 +66,40 @@ function normalizeJobs(payload) {
   if (Array.isArray(payload?.items)) return payload.items;
   if (Array.isArray(payload?.data)) return payload.data;
   return null;
+}
+
+function recordDate(record) {
+  const value = record?.createdAt ?? record?.created_at ??
+    record?.startedAt ?? record?.updatedAt ?? record?.updated_at;
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function filterRecordsByPeriod(records, period) {
+  if (period === "all") return records;
+  const now = new Date();
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  if (period === "7d") start.setDate(start.getDate() - 6);
+  if (period === "30d") start.setDate(start.getDate() - 29);
+  return records.filter((record) => {
+    const created = recordDate(record);
+    return created && created >= start && created <= now;
+  });
+}
+
+async function fetchScopedJson(path) {
+  const response = await fetch(`${EXPRESS_API_BASE_URL}${path}`, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+    headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+  });
+  if (!response.ok) {
+    throw new Error(`Request failed (HTTP ${response.status}).`);
+  }
+  return response.json();
 }
 
 function validDate(value) {
@@ -130,6 +168,12 @@ export default function AnalyticsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [workspaceTasks, setWorkspaceTasks] = useState([]);
+  const [workspaceDocuments, setWorkspaceDocuments] = useState([]);
+  const [workspaceRuns, setWorkspaceRuns] = useState([]);
+  const [workspaceError, setWorkspaceError] = useState("");
+  const [workspaceLoading, setWorkspaceLoading] = useState(true);
+  const [workspaceUpdated, setWorkspaceUpdated] = useState(null);
 
   const loadJobs = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -196,6 +240,83 @@ export default function AnalyticsPage() {
     const interval = window.setInterval(() => loadJobs(true), 30000);
     return () => window.clearInterval(interval);
   }, [loadJobs]);
+
+  const loadWorkspaceData = useCallback(async () => {
+    setWorkspaceLoading(true);
+    const results = await Promise.allSettled([
+      fetchScopedJson("/ai/multi-agent/tasks?limit=50"),
+      fetchScopedJson("/ai/documents"),
+      fetchScopedJson("/ai/runs?limit=50"),
+    ]);
+    const errors = [];
+    const [tasksResult, documentsResult, runsResult] = results;
+    if (tasksResult.status === "fulfilled") {
+      const payload = tasksResult.value;
+      const records = Array.isArray(payload) ? payload :
+        payload?.tasks ?? payload?.items ?? payload?.data ?? [];
+      setWorkspaceTasks(Array.isArray(records) ? records : []);
+    } else {
+      errors.push(`AI tasks: ${tasksResult.reason?.message || "Unavailable"}`);
+    }
+    if (documentsResult.status === "fulfilled") {
+      const payload = documentsResult.value;
+      const records = Array.isArray(payload) ? payload :
+        payload?.documents ?? payload?.items ?? payload?.data ?? [];
+      setWorkspaceDocuments(Array.isArray(records) ? records : []);
+    } else {
+      errors.push(`Documents: ${documentsResult.reason?.message || "Unavailable"}`);
+    }
+    if (runsResult.status === "fulfilled") {
+      const payload = runsResult.value;
+      const records = Array.isArray(payload) ? payload :
+        payload?.runs ?? payload?.items ?? payload?.data ?? [];
+      setWorkspaceRuns(Array.isArray(records) ? records : []);
+    } else {
+      errors.push(`AI executions: ${runsResult.reason?.message || "Unavailable"}`);
+    }
+    setWorkspaceError(errors.join(" "));
+    setWorkspaceUpdated(new Date());
+    setWorkspaceLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void loadWorkspaceData();
+    const interval = window.setInterval(() => void loadWorkspaceData(), 30000);
+    return () => window.clearInterval(interval);
+  }, [loadWorkspaceData]);
+
+  const filteredWorkspaceTasks = useMemo(
+    () => filterRecordsByPeriod(workspaceTasks, period),
+    [workspaceTasks, period],
+  );
+  const filteredWorkspaceDocuments = useMemo(
+    () => filterRecordsByPeriod(workspaceDocuments, period),
+    [workspaceDocuments, period],
+  );
+  const filteredWorkspaceRuns = useMemo(
+    () => filterRecordsByPeriod(workspaceRuns, period),
+    [workspaceRuns, period],
+  );
+  const workspaceMetrics = useMemo(() => {
+    const active = filteredWorkspaceTasks.filter((task) =>
+      ["queued", "pending", "processing", "running", "in_progress"].includes(
+        String(task.status || "").toLowerCase(),
+      ),
+    ).length;
+    const failedTasks = filteredWorkspaceTasks.filter((task) =>
+      String(task.status || "").toLowerCase() === "failed",
+    ).length;
+    const failedRuns = filteredWorkspaceRuns.filter((run) =>
+      String(run.status || "").toLowerCase() === "failed",
+    ).length;
+    return {
+      tasks: filteredWorkspaceTasks.length,
+      active,
+      documents: filteredWorkspaceDocuments.length,
+      runs: filteredWorkspaceRuns.length,
+      failures: failedTasks + failedRuns,
+    };
+  }, [filteredWorkspaceTasks, filteredWorkspaceDocuments, filteredWorkspaceRuns]);
 
   const filteredJobs = useMemo(() => {
     if (period === "all") return jobs;
@@ -410,7 +531,7 @@ export default function AnalyticsPage() {
         <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
           <button
             type="button"
-            onClick={() => loadJobs(true)}
+            onClick={() => { void loadJobs(true); void loadWorkspaceData(); }}
             disabled={loading || refreshing}
             className="inline-flex items-center gap-2 rounded-lg border border-base-300 bg-base-100 px-3.5 py-2 text-xs font-semibold text-base-content/75 transition hover:border-base-content/25 hover:bg-base-200 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -460,13 +581,83 @@ export default function AnalyticsPage() {
           </div>
           <button
             type="button"
-            onClick={() => loadJobs(true)}
+            onClick={() => { void loadJobs(true); void loadWorkspaceData(); }}
             className="text-sm font-semibold text-primary"
           >
             Retry
           </button>
         </section>
       )}
+
+      <section className="rounded-2xl border border-base-300/70 bg-base-100/70 p-4 shadow-sm sm:p-5">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">AI & knowledge intelligence</p>
+            <h2 className="mt-1 text-lg font-semibold tracking-tight">Workspace activity</h2>
+            <p className="mt-1 text-xs text-base-content/50">Authenticated workspace data · selected reporting period</p>
+          </div>
+          <p className="text-[10px] text-base-content/45">
+            {workspaceUpdated ? `Updated ${workspaceUpdated.toLocaleTimeString()}` : "Loading workspace data"}
+          </p>
+        </div>
+        {workspaceError && (
+          <div role="status" className="mb-4 rounded-xl border border-warning/25 bg-warning/5 px-3 py-2 text-xs text-base-content/70">
+            Some workspace data could not be loaded: {workspaceError}
+          </div>
+        )}
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            { label: "AI tasks", value: workspaceMetrics.tasks, detail: `${workspaceMetrics.active} active · ${workspaceMetrics.failures} failures`, icon: Workflow },
+            { label: "Active tasks", value: workspaceMetrics.active, detail: "Queued or currently running", icon: Activity },
+            { label: "Knowledge documents", value: workspaceMetrics.documents, detail: "Documents in the returned sample", icon: ShieldCheck },
+            { label: "AI executions", value: workspaceMetrics.runs, detail: "Recorded AI runs in this period", icon: Zap },
+          ].map((item) => {
+            const Icon = item.icon;
+            return (
+              <article key={item.label} className="rounded-xl border border-base-300/70 bg-base-200/35 p-4 transition duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-base-content/60">{item.label}</p>
+                  <Icon size={16} className="text-primary/75" />
+                </div>
+                <p className="mt-3 text-3xl font-semibold tracking-tight tabular-nums">
+                  {workspaceLoading && !workspaceUpdated ? "—" : item.value}
+                </p>
+                <p className="mt-2 text-[11px] text-base-content/50">{item.detail}</p>
+              </article>
+            );
+          })}
+        </div>
+        <div className="mt-4 rounded-xl border border-base-300/60 bg-base-200/20 p-4">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold">Recent AI task activity</h3>
+            <span className="text-[10px] text-base-content/45">Latest 6 · available sample</span>
+          </div>
+          {filteredWorkspaceTasks.length === 0 ? (
+            <p className="py-3 text-xs text-base-content/50">
+              {workspaceLoading ? "Loading AI task activity…" : "No AI tasks found in this reporting period."}
+            </p>
+          ) : (
+            <div className="divide-y divide-base-300/60">
+              {filteredWorkspaceTasks.slice(0, 6).map((task, index) => (
+                <div key={task.id || task._id || index} className="flex flex-wrap items-center justify-between gap-2 py-3 first:pt-0 last:pb-0">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-medium">{task.name || task.type || task.title || `AI task ${index + 1}`}</p>
+                    <p className="mt-1 text-[10px] text-base-content/45">
+                      {recordDate(task)?.toLocaleString() || "Date unavailable"}
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-base-300 px-2.5 py-1 text-[10px] font-semibold capitalize text-base-content/65">
+                    {String(task.status || "unknown").replaceAll("_", " ")}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <p className="mt-3 text-[10px] leading-5 text-base-content/40">
+          Workspace figures reflect authenticated API results and the available record sample. They are not company-wide totals.
+        </p>
+      </section>
 
       <section>
         <div className="mb-3 flex flex-wrap items-end justify-between gap-2">

@@ -14,7 +14,6 @@ import {
   ArrowRight,
   Bot,
   CheckCircle2,
-  Clock3,
   Database,
   Network,
   Radio,
@@ -22,6 +21,28 @@ import {
   Workflow,
   Zap,
 } from "lucide-react";
+
+const EXPRESS_API_URL = (
+  import.meta.env.MODE === "development" ? "http://localhost:5001/api" : "/api"
+).replace(/\/+$/, "");
+
+async function fetchExpressJson(url) {
+  const response = await fetch(url, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error("Sign in again to view AI telemetry.");
+    }
+    throw new Error(`Service returned HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
 
 const HEALTH_CHECKS = [
   {
@@ -68,19 +89,52 @@ const INITIAL_HEALTH = Object.fromEntries(
   ]),
 );
 
-const buildMetrics = (queuedJobs) => [
-  { label: "API requests", value: "—", detail: "Waiting for telemetry", icon: Activity, accent: "text-sky-400", glow: "bg-sky-400/10" },
-  { label: "Active AI runs", value: "—", detail: "Waiting for agent data", icon: Bot, accent: "text-cyan-400", glow: "bg-cyan-400/10" },
-  { label: "Average latency", value: "—", detail: "No measurements connected", icon: Zap, accent: "text-blue-400", glow: "bg-blue-400/10" },
-  {
-    label: "Queued jobs",
-    value: queuedJobs.value,
-    detail: queuedJobs.detail,
-    icon: Workflow,
-    accent: "text-indigo-400",
-    glow: "bg-indigo-400/10",
-  },
-];
+const buildMetrics = (queuedJobs, aiTelemetry, aiRuns) => {
+  const rows = aiTelemetry?.metrics || [];
+  const totals = rows.reduce(
+    (total, row) => ({
+      requests: total.requests + (Number(row.request_count) || 0),
+      failures: total.failures + (Number(row.failure_count) || 0),
+      highestP95: Math.max(total.highestP95, Number(row.p95_latency_ms) || 0),
+    }),
+    { requests: 0, failures: 0, highestP95: 0 },
+  );
+
+  return [
+    {
+      label: "API requests",
+      value: aiTelemetry ? totals.requests.toLocaleString() : "—",
+      detail: aiTelemetry ? "Process-local AI service requests" : "AI telemetry unavailable",
+      icon: Activity, accent: "text-sky-400", glow: "bg-sky-400/10",
+    },
+    {
+      label: "AI executions",
+      value: aiRuns === null ? "—" : String(aiRuns.length),
+      detail: aiRuns === null ? "Execution history unavailable" : "Latest 100 execution records",
+      icon: Bot, accent: "text-cyan-400", glow: "bg-cyan-400/10",
+    },
+    {
+      label: "Highest route p95",
+      value: aiTelemetry && totals.highestP95 ? `${Math.round(totals.highestP95)} ms` : "—",
+      detail: "Highest reported route p95 latency",
+      icon: Zap, accent: "text-blue-400", glow: "bg-blue-400/10",
+    },
+    {
+      label: "API error rate",
+      value: aiTelemetry
+        ? (totals.requests ? `${((totals.failures / totals.requests) * 100).toFixed(1)}%` : "0.0%")
+        : "—",
+      detail: aiTelemetry ? `${totals.failures} failures / ${totals.requests} requests` : "Waiting for telemetry",
+      icon: Activity, accent: "text-rose-400", glow: "bg-rose-400/10",
+    },
+    {
+      label: "Queued jobs",
+      value: queuedJobs.value,
+      detail: queuedJobs.detail,
+      icon: Workflow, accent: "text-indigo-400", glow: "bg-indigo-400/10",
+    },
+  ];
+};
 
 const services = [
   { name: "Relay Gateway", detail: "Reverse proxy and API routing", icon: Network, healthId: "gateway", category: "Gateway" },
@@ -193,6 +247,8 @@ export default function OperationsOverview() {
     value: "—",
     detail: "Loading authenticated job history…",
   });
+  const [aiTelemetry, setAiTelemetry] = useState(null);
+  const [aiRuns, setAiRuns] = useState(null);
 
   const loadQueuedJobs = useCallback(async () => {
     const apiBaseUrl = (
@@ -267,6 +323,41 @@ export default function OperationsOverview() {
     const interval = setInterval(loadQueuedJobs, 30000);
     return () => clearInterval(interval);
   }, [loadQueuedJobs]);
+
+  const loadAiTelemetry = useCallback(async () => {
+    const results = await Promise.allSettled([
+      fetchExpressJson(`${EXPRESS_API_URL}/ai/metrics`),
+      fetchExpressJson(`${EXPRESS_API_URL}/ai/runs?limit=100`),
+    ]);
+
+    const metricsResult = results[0];
+    const runsResult = results[1];
+
+    if (
+      metricsResult.status === "fulfilled" &&
+      metricsResult.value?.scope === "process_local" &&
+      Array.isArray(metricsResult.value.metrics)
+    ) {
+      setAiTelemetry(metricsResult.value);
+    } else {
+      setAiTelemetry(null);
+    }
+
+    if (
+      runsResult.status === "fulfilled" &&
+      Array.isArray(runsResult.value?.runs)
+    ) {
+      setAiRuns(runsResult.value.runs);
+    } else {
+      setAiRuns(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAiTelemetry();
+    const intervalId = setInterval(loadAiTelemetry, 30000);
+    return () => clearInterval(intervalId);
+  }, [loadAiTelemetry]);
 
   const checkHealth = useCallback(async () => {
     setHealthRefreshing(true);
@@ -764,8 +855,8 @@ export default function OperationsOverview() {
             Telemetry pending
           </Badge>
         </SectionTitle>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {buildMetrics(queuedJobs).map((metric) => (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+          {buildMetrics(queuedJobs, aiTelemetry, aiRuns).map((metric) => (
             <MetricCard key={metric.label} metric={metric} />
           ))}
         </div>
@@ -892,24 +983,21 @@ export default function OperationsOverview() {
       </section>
 
       <section className="relay-panel rounded-2xl p-5 sm:p-7">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-          <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-secondary/10 text-secondary">
-            <Clock3 size={20} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="relay-eyebrow mb-2">Integration roadmap</p>
-            <h2 className="text-base font-semibold">Connect the signals behind your platform</h2>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="relay-eyebrow mb-2">Platform observability</p>
+            <h2 className="text-base font-semibold">Operational telemetry</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-base-content/55">
-              Connect request metrics, latency measurements, queue depth, error
-              rates, and AI execution history to populate this control center with
-              verified operational data.
+              Live operational indicators are refreshed automatically. AI request
+              metrics are process-local, and execution counts reflect the latest
+              available history.
             </p>
           </div>
           <Link
             to="/infrastructure"
             className="inline-flex shrink-0 items-center gap-2 self-start rounded-xl border border-base-300 px-4 py-2.5 text-sm font-medium transition hover:border-primary/40 hover:text-primary"
           >
-            Review infrastructure <ArrowDownRight size={16} />
+            View infrastructure <ArrowDownRight size={16} />
           </Link>
         </div>
       </section>

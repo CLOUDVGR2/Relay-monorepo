@@ -99,6 +99,8 @@ services:
     restart: unless-stopped
     init: true
     command: ["/data"]
+    ports:
+      - "9000:9000"
     environment:
       RUSTFS_ADDRESS: ":9000"
       RUSTFS_VOLUMES: /data
@@ -112,6 +114,12 @@ services:
     depends_on:
       rustfs-permissions:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9000/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     security_opt:
       - no-new-privileges:true
     mem_limit: 512m
@@ -188,6 +196,51 @@ services:
     pids_limit: 100
     stop_grace_period: 35s
 
+  recording-worker:
+    image: relay-recording-worker:local
+    build:
+      context: ./services/ai-service
+      dockerfile: Dockerfile.recording-worker
+    restart: unless-stopped
+    init: true
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://atlas_ai:${ATLAS_POSTGRES_PASSWORD:?Set ATLAS_POSTGRES_PASSWORD in root .env}@postgres:5432/atlas_ai"
+      REDIS_URL: redis://redis:6379
+      CALL_RECORDING_STORAGE_ENDPOINT: http://rustfs:9000
+      CALL_RECORDING_STORAGE_BUCKET: ${CALL_RECORDING_STORAGE_BUCKET:?Set CALL_RECORDING_STORAGE_BUCKET in root .env}
+      CALL_RECORDING_STORAGE_REGION: ${CALL_RECORDING_STORAGE_REGION:?Set CALL_RECORDING_STORAGE_REGION in root .env}
+      CALL_RECORDING_STORAGE_ACCESS_KEY_ID: ${CALL_RECORDING_STORAGE_ACCESS_KEY_ID:?Set CALL_RECORDING_STORAGE_ACCESS_KEY_ID in root .env}
+      CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY: ${CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY:?Set CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY in root .env}
+      CALL_RECORDING_STORAGE_FORCE_PATH_STYLE: ${CALL_RECORDING_STORAGE_FORCE_PATH_STYLE:-true}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      WHISPER_MODEL_SIZE: tiny
+      WHISPER_DEVICE: cpu
+      WHISPER_COMPUTE_TYPE: int8
+      WHISPER_CPU_THREADS: "2"
+      RECORDING_JOB_LEASE_SECONDS: "120"
+      RECORDING_JOB_HEARTBEAT_SECONDS: "40"
+      RECORDING_JOB_MAX_ATTEMPTS: "3"
+      RECORDING_JOB_RETRY_DELAY_SECONDS: "30"
+      RECORDING_WORKER_POLL_SECONDS: "3"
+      LOG_LEVEL: INFO
+    volumes:
+      - recording_worker_model_cache:/home/worker/.cache/huggingface
+    networks:
+      - relay-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    cpus: 2.0
+    pids_limit: 100
+    stop_grace_period: 5m
+
   express-api:
     image: relay-monorepo-express-api:local
     build:
@@ -220,6 +273,12 @@ services:
         condition: service_healthy
       ai-service:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5001/api/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     security_opt:
       - no-new-privileges:true
     mem_limit: 512m
@@ -247,6 +306,7 @@ services:
       CALL_EVENTS_BASE_URL: http://express-api:5001
       CALL_EVENTS_INTERNAL_TOKEN: ${CALL_EVENTS_INTERNAL_TOKEN:?Set CALL_EVENTS_INTERNAL_TOKEN in root .env}
       CALL_RECORDING_STORAGE_ENDPOINT: http://rustfs:9000
+      CALL_RECORDING_STORAGE_PUBLIC_ENDPOINT: ${CALL_RECORDING_STORAGE_PUBLIC_ENDPOINT:?Set CALL_RECORDING_STORAGE_PUBLIC_ENDPOINT in root .env}
       CALL_RECORDING_STORAGE_BUCKET: ${CALL_RECORDING_STORAGE_BUCKET:?Set CALL_RECORDING_STORAGE_BUCKET in root .env}
       CALL_RECORDING_STORAGE_REGION: ${CALL_RECORDING_STORAGE_REGION:?Set CALL_RECORDING_STORAGE_REGION in root .env}
       CALL_RECORDING_STORAGE_ACCESS_KEY_ID: ${CALL_RECORDING_STORAGE_ACCESS_KEY_ID:?Set CALL_RECORDING_STORAGE_ACCESS_KEY_ID in root .env}
@@ -264,7 +324,13 @@ services:
       redis:
         condition: service_healthy
       rustfs:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     security_opt:
       - no-new-privileges:true
     mem_limit: 512m
@@ -294,6 +360,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     read_only: true
     security_opt:
       - no-new-privileges:true
@@ -349,13 +421,13 @@ services:
       - relay-network
     depends_on:
       express-api:
-        condition: service_started
+        condition: service_healthy
       nest-api:
-        condition: service_started
+        condition: service_healthy
       jobs-api:
-        condition: service_started
+        condition: service_healthy
       ai-service:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8090/healthz"]
       interval: 30s
@@ -390,14 +462,126 @@ services:
       api-gateway:
         condition: service_started
 
+
+  mobile:
+    image: relay-monorepo-mobile:local
+    build:
+      context: .
+      dockerfile: apps/mobile/Dockerfile
+    restart: unless-stopped
+    init: true
+    working_dir: /workspace/apps/mobile
+    env_file:
+      - ./apps/mobile/.env
+    environment:
+      EXPO_DEVTOOLS_LISTEN_ADDRESS: 0.0.0.0
+      EXPO_NO_TELEMETRY: "1"
+      REACT_NATIVE_PACKAGER_HOSTNAME: ${MOBILE_HOST_IP:-10.94.194.50}
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./apps/mobile:/workspace/apps/mobile
+      - mobile_root_node_modules:/workspace/node_modules
+      - mobile_node_modules:/workspace/apps/mobile/node_modules
+    networks:
+      - relay-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8081/status').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - relay_prometheus_data:/prometheus
+    networks:
+      - relay-network
+    depends_on:
+      - blackbox-exporter
+      - cadvisor
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in root .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: http://localhost:3001
+    ports:
+      - "127.0.0.1:3001:3000"
+    volumes:
+      - relay_grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - relay-network
+    depends_on:
+      - prometheus
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    networks:
+      - relay-network
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.27.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/blackbox_exporter/config.yml
+    volumes:
+      - ./monitoring/blackbox/config.yml:/etc/blackbox_exporter/config.yml:ro
+    networks:
+      - relay-network
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+
 networks:
   relay-network:
     name: relay-monorepo_network
     driver: bridge
 
 volumes:
+  relay_prometheus_data:
+    name: relay-monorepo_prometheus_data
+  relay_grafana_data:
+    name: relay-monorepo_grafana_data
   call_recording_storage_data:
     name: relay-monorepo_call_recording_storage_data
+  recording_worker_model_cache:
+    name: relay-monorepo_recording_worker_model_cache
+    external: true
   mongodb_data:
     name: relay-monorepo_mongodb_data
   atlas_postgres_data:
@@ -406,3 +590,5 @@ volumes:
     name: relay-monorepo_redis_data
   rabbitmq_data:
     name: relay-monorepo_rabbitmq_data
+  mobile_root_node_modules:
+  mobile_node_modules:

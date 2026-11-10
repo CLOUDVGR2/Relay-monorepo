@@ -8,6 +8,8 @@ services:
     image: relay-jenkins:local
     container_name: relay-jenkins
     restart: unless-stopped
+    init: true
+    stop_grace_period: 1m
     group_add:
       - "0"
     ports:
@@ -15,6 +17,12 @@ services:
     volumes:
       - jenkins_home:/var/jenkins_home
       - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/login >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 300s
 
 volumes:
   jenkins_home:

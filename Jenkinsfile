@@ -11,6 +11,7 @@ pipeline {
     environment {
         CI_EXPRESS_API_IMAGE = 'relay-ci-express-api:local'
         CI_WEB_IMAGE = 'relay-ci-web:local'
+        CI_MOBILE_IMAGE = 'relay-ci-mobile:local'
         CI_API_GATEWAY_IMAGE = 'relay-ci-api-gateway:local'
         CI_JOBS_API_IMAGE = 'relay-ci-jobs-api:local'
         CI_JOBS_WORKER_IMAGE = 'relay-ci-jobs-worker:local'
@@ -39,7 +40,8 @@ pipeline {
                     test -f infrastructure/devops/jenkins/ci/jobs-worker.Dockerfile
                     test -f infrastructure/devops/jenkins/ci/nest-api.Dockerfile
                     test -f infrastructure/devops/jenkins/ci/ai-service.Dockerfile
-                    echo "Repository and all six CI runner definitions found."
+                    test -f infrastructure/devops/jenkins/ci/mobile.Dockerfile
+                    echo "Repository and all eight CI runner definitions found."
                 '''
             }
         }
@@ -51,6 +53,17 @@ pipeline {
                     docker build --pull=false \
                       -f infrastructure/devops/jenkins/ci/web.Dockerfile \
                       -t "$CI_WEB_IMAGE" .
+                '''
+            }
+        }
+
+        stage('Build and test Mobile') {
+            steps {
+                sh '''
+                    set -eu
+                    docker build --pull=false \
+                      -f infrastructure/devops/jenkins/ci/mobile.Dockerfile \
+                      -t "$CI_MOBILE_IMAGE" .
                 '''
             }
         }
@@ -279,7 +292,7 @@ pipeline {
             '''
         }
         success {
-            echo 'Relay CI passed: frontend, Go API gateway, Go Jobs API, Go Jobs Worker, Python AI service, NestJS API, and Express API.'
+            echo 'Relay CI passed: frontend, mobile, Go API gateway, Go Jobs API, Go Jobs Worker, Python AI service, NestJS API, and Express API.'
         }
         failure {
             echo 'Relay CI failed. Review the first failed stage and its test output.'
