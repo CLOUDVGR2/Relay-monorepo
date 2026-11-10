@@ -4,11 +4,12 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Security
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Security
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agentops.routes import _get_or_create_tenant
+from app.core.openapi import TENANT_ERROR_RESPONSES, error_response
 from app.core.security import require_internal_token
 from app.db.session import get_db
 from app.models.multi_agent_task import MultiAgentTask
@@ -20,6 +21,7 @@ router = APIRouter(
     prefix="/v1/multi-agent/tasks",
     tags=["multi-agent"],
     dependencies=[Security(require_internal_token)],
+    responses=TENANT_ERROR_RESPONSES,
 )
 
 
@@ -83,9 +85,13 @@ def _to_response(task: MultiAgentTask) -> TaskResponse:
     )
 
 
-@router.post("", response_model=TaskResponse, status_code=201)
+@router.post("", response_model=TaskResponse, status_code=201,
+    summary='Create Multi-Agent Task',
+    description='Validates and enqueues a multi-agent task for asynchronous worker execution. The prompt supports up to 4,000 characters. max_steps defaults to 8 and ranges from 1 to 12. timeout_seconds defaults to 180 and cannot exceed 240 seconds. The returned task represents its current lifecycle state; execution may still be pending.',
+    response_description='The newly created task and its current execution status.',
+)
 async def create_task(
-    payload: TaskRequest,
+    payload: TaskRequest = Body(description='Task prompt and execution constraints for asynchronous multi-agent processing. Configure the maximum number of steps and execution timeout within the documented limits.'),
     relay_user_id: str = Header(alias="X-Relay-User-Id"),
     db: AsyncSession = Depends(get_db),
 ) -> TaskResponse:
@@ -102,7 +108,11 @@ async def create_task(
     return _to_response(task)
 
 
-@router.get("", response_model=list[TaskResponse])
+@router.get("", response_model=list[TaskResponse],
+    summary='List Multi-Agent Tasks',
+    description='Returns recent tasks belonging only to the tenant resolved from X-Relay-User-Id. Supports pagination using limit and offset. limit defaults to 20 and ranges from 1 to 100. Internal worker lease and execution data are excluded from the public response.',
+    response_description='The requested page of tenant-scoped task records.',
+)
 async def list_tasks(
     relay_user_id: str = Header(alias="X-Relay-User-Id"),
     limit: int = Query(default=20, ge=1, le=100),
@@ -121,7 +131,15 @@ async def list_tasks(
     return [_to_response(task) for task in tasks]
 
 
-@router.get("/{task_id}", response_model=TaskResponse)
+@router.get(
+    "/{task_id}",
+    response_model=TaskResponse,
+    responses={404: error_response("Task not found.")},
+
+    summary='Get Multi-Agent Task',
+    description='Retrieves a task by UUID within the tenant resolved from X-Relay-User-Id. Does not reveal whether a task with the supplied identifier belongs to another tenant. Internal worker lease and execution data are excluded from the response.',
+    response_description='The requested task and its current progress or result.',
+)
 async def get_task(
     task_id: uuid.UUID,
     relay_user_id: str = Header(alias="X-Relay-User-Id"),

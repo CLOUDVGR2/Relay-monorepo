@@ -2,11 +2,12 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Security
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Security
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agentops.routes import _get_or_create_tenant
+from app.core.openapi import TENANT_ERROR_RESPONSES, error_response
 from app.core.security import require_internal_token
 from app.db.session import get_db
 from app.models.document import Document
@@ -29,12 +30,22 @@ router = APIRouter(
     prefix="/v1/documents",
     tags=["rag-documents"],
     dependencies=[Security(require_internal_token)],
+    responses=TENANT_ERROR_RESPONSES,
 )
 
 
-@router.post("", response_model=DocumentResponse, status_code=201)
+@router.post(
+    "",
+    response_model=DocumentResponse,
+    status_code=201,
+    responses={502: error_response("Document ingestion or embedding failed.")},
+
+    summary='Ingest Document',
+    description='Creates a document in the tenant workspace and processes its content for retrieval. Document ingestion includes the configured embedding workflow. The document is associated with the tenant resolved from X-Relay-User-Id.',
+    response_description='The newly ingested document and its processing status.',
+)
 async def create_document(
-    payload: DocumentCreate,
+    payload: DocumentCreate = Body(description="Document content and metadata to ingest into the authenticated tenant's document collection."),
     relay_user_id: str = Header(alias="X-Relay-User-Id"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -57,9 +68,17 @@ async def create_document(
     return document
 
 
-@router.post("/search", response_model=DocumentSearchResponse)
+@router.post(
+    "/search",
+    response_model=DocumentSearchResponse,
+    responses={502: error_response("Document search or embedding failed.")},
+
+    summary='Search Documents',
+    description='Performs semantic retrieval across documents belonging to the resolved tenant. The query is embedded and used to retrieve the most relevant content chunks. top_k defaults to 5 and must be between 1 and 20. Results include relevance scores and source document metadata.',
+    response_description='The search query and its ranked matching document chunks.',
+)
 async def search_documents(
-    payload: DocumentSearchRequest,
+    payload: DocumentSearchRequest = Body(description='Semantic search query and the maximum number of relevant content chunks to retrieve. top_k defaults to 5 and ranges from 1 to 20.'),
     relay_user_id: str = Header(alias="X-Relay-User-Id"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -84,9 +103,17 @@ async def search_documents(
     )
 
 
-@router.post("/answer", response_model=DocumentAnswerResponse)
+@router.post(
+    "/answer",
+    response_model=DocumentAnswerResponse,
+    responses={502: error_response("Grounded answer generation failed.")},
+
+    summary='Answer Using Documents',
+    description="Generates an answer to a question using relevant content retrieved from the resolved tenant's document collection. The response includes citations identifying the source documents and content chunks. top_k defaults to 5 and must be between 1 and 20.",
+    response_description='The generated answer and its supporting document citations.',
+)
 async def answer_documents(
-    payload: DocumentAnswerRequest,
+    payload: DocumentAnswerRequest = Body(description="Question to answer using the authenticated tenant's document collection and the maximum number of supporting chunks to retrieve."),
     relay_user_id: str = Header(alias="X-Relay-User-Id"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -125,7 +152,11 @@ async def answer_documents(
     )
 
 
-@router.get("", response_model=list[DocumentResponse])
+@router.get("", response_model=list[DocumentResponse],
+    summary='List Documents',
+    description='Returns documents belonging only to the tenant resolved from X-Relay-User-Id. Results are ordered by creation time, newest first, with document UUID as a secondary ordering key. Supports pagination using limit and offset. limit defaults to 20 and ranges from 1 to 100.',
+    response_description='The requested page of tenant-scoped documents.',
+)
 async def list_documents(
     relay_user_id: str = Header(alias="X-Relay-User-Id"),
     limit: int = Query(default=20, ge=1, le=100),
@@ -144,7 +175,15 @@ async def list_documents(
     return result.all()
 
 
-@router.get("/{document_id}", response_model=DocumentResponse)
+@router.get(
+    "/{document_id}",
+    response_model=DocumentResponse,
+    responses={404: error_response("Document not found.")},
+
+    summary='Get Document',
+    description='Retrieves a document by UUID within the tenant resolved from X-Relay-User-Id. Documents belonging to other tenants are not exposed.',
+    response_description='The requested tenant-scoped document.',
+)
 async def get_document(
     document_id: uuid.UUID,
     relay_user_id: str = Header(alias="X-Relay-User-Id"),

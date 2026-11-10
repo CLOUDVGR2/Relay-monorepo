@@ -8,6 +8,7 @@ import pytest
 from app.multi_agent.contracts import (
     PlanStep,
     ReviewResult,
+    SpecialistOutput,
     TaskPlan,
     TaskRequest,
 )
@@ -33,8 +34,15 @@ def test_factory_defaults_to_mock(monkeypatch):
     monkeypatch.delenv("MULTI_AGENT_PROVIDER", raising=False)
     providers = get_multi_agent_providers()
     assert isinstance(providers.planner, MockMultiAgentProvider)
-    assert providers.planner is providers.executor
-    assert providers.executor is providers.reviewer
+    role_providers = (
+        providers.planner,
+        providers.executor,
+        providers.researcher,
+        providers.analyst,
+        providers.writer,
+        providers.reviewer,
+    )
+    assert all(provider is providers.planner for provider in role_providers)
 
 
 def test_factory_explicit_mock_does_not_change_investigation_setting(
@@ -104,6 +112,113 @@ async def test_mock_provider_reviews_outputs():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "role"),
+    [
+        ("research", "research"),
+        ("analyze", "analysis"),
+        ("write", "writing"),
+    ],
+)
+async def test_mock_provider_supports_specialist_operations(method, role):
+    provider = MockMultiAgentProvider()
+    step = PlanStep(
+        id="specialist",
+        objective="Work with supplied evidence",
+        expected_output="Structured result",
+    )
+
+    result = await getattr(provider, method)(step, {"source": "Evidence"})
+
+    assert isinstance(result, SpecialistOutput)
+    assert role in result.content
+    assert "Evidence" in result.content
+    assert result.caveats
+    assert result.evidence_refs == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "operation", "instruction"),
+    [
+        ("research", "research", "research specialist"),
+        ("analyze", "analyze", "analytical specialist"),
+        ("write", "write", "writing specialist"),
+    ],
+)
+async def test_litellm_specialists_use_distinct_structured_operations(
+    monkeypatch, method, operation, instruction
+):
+    import app.multi_agent.providers as module
+
+    calls = []
+
+    async def fake_acompletion(**kwargs):
+        calls.append(kwargs)
+        return fake_response(
+            json.dumps(
+                {
+                    "content": f"Completed {operation}",
+                    "caveats": ["Limited to supplied evidence"],
+                    "evidence_refs": ["source-1"],
+                }
+            )
+        )
+
+    monkeypatch.setattr(module, "acompletion", fake_acompletion)
+    provider = LiteLLMMultiAgentProvider()
+    step = PlanStep(
+        id="specialist",
+        objective="Work with supplied evidence",
+        expected_output="Structured result",
+    )
+
+    class VerifiedDependencies(dict):
+        evidence_refs = frozenset({"source-1"})
+
+    result = await getattr(provider, method)(
+        step,
+        VerifiedDependencies({"source": "Evidence"}),
+    )
+
+    assert isinstance(result, SpecialistOutput)
+    assert result.content == f"Completed {operation}"
+    assert calls[0]["response_format"] is SpecialistOutput
+    if method == "write":
+        system_instructions = calls[0]["messages"][0]["content"]
+        assert "return an empty evidence_refs list" in system_instructions
+        assert "Never invent placeholder references" in system_instructions
+    assert instruction in calls[0]["messages"][0]["content"]
+    assert "Evidence" in calls[0]["messages"][1]["content"]
+    payload = json.loads(calls[0]["messages"][1]["content"])
+    assert payload["allowed_evidence_refs"] == ["source-1"]
+
+
+@pytest.mark.asyncio
+async def test_litellm_specialist_rejects_invalid_structured_output(monkeypatch):
+    import app.multi_agent.providers as module
+
+    async def fake_acompletion(**kwargs):
+        return fake_response('{"unexpected": "field"}')
+
+    monkeypatch.setattr(module, "acompletion", fake_acompletion)
+    provider = LiteLLMMultiAgentProvider()
+
+    with pytest.raises(
+        MultiAgentProviderError,
+        match="invalid structured output",
+    ):
+        await provider.research(
+            PlanStep(
+                id="research",
+                objective="Research supplied evidence",
+                expected_output="Findings",
+            ),
+            {},
+        )
+
+
+@pytest.mark.asyncio
 async def test_litellm_plan_uses_structured_output_and_validates(
     monkeypatch,
 ):
@@ -145,6 +260,70 @@ async def test_litellm_plan_uses_structured_output_and_validates(
     assert calls[0]["api_base"] == "https://provider.invalid/v1"
     assert calls[0]["response_format"] is TaskPlan
     assert calls[0]["temperature"] == 0
+    planner_instructions = calls[0]["messages"][0]["content"]
+    assert "Prefer the smallest useful plan" in planner_instructions
+    assert "use exactly one specialist step" in planner_instructions
+    assert "Never split one writing deliverable" in planner_instructions
+
+
+@pytest.mark.asyncio
+async def test_litellm_plan_removes_terminal_reviewer_step(monkeypatch):
+    import app.multi_agent.providers as module
+
+    async def fake_acompletion(**kwargs):
+        return fake_response(json.dumps({"steps": [
+            {
+                "id": "draft",
+                "role": "writer",
+                "depends_on": [],
+                "objective": "Write the requested draft",
+                "expected_output": "Draft",
+            },
+            {
+                "id": "review",
+                "role": "reviewer",
+                "depends_on": ["draft"],
+                "objective": "Review and revise the draft",
+                "expected_output": "Reviewed draft",
+            },
+        ]}))
+
+    monkeypatch.setattr(module, "acompletion", fake_acompletion)
+    provider = LiteLLMMultiAgentProvider()
+    result = await provider.plan(TaskRequest(prompt="Write and review a draft"))
+
+    assert len(result.steps) == 1
+    assert result.steps[0].id == "draft"
+    assert result.steps[0].role.value == "writer"
+
+
+@pytest.mark.asyncio
+async def test_litellm_plan_rejects_nonterminal_reviewer_step(monkeypatch):
+    import app.multi_agent.providers as module
+
+    async def fake_acompletion(**kwargs):
+        return fake_response(json.dumps({"steps": [
+            {
+                "id": "review",
+                "role": "reviewer",
+                "depends_on": [],
+                "objective": "Review the supplied material",
+                "expected_output": "Review notes",
+            },
+            {
+                "id": "draft",
+                "role": "writer",
+                "depends_on": ["review"],
+                "objective": "Write using the review notes",
+                "expected_output": "Draft",
+            },
+        ]}))
+
+    monkeypatch.setattr(module, "acompletion", fake_acompletion)
+    provider = LiteLLMMultiAgentProvider()
+
+    with pytest.raises(MultiAgentProviderError, match="invalid structured output"):
+        await provider.plan(TaskRequest(prompt="Write and review a draft"))
 
 
 @pytest.mark.asyncio
@@ -221,6 +400,7 @@ async def test_litellm_review_validates_schema(monkeypatch):
 
     async def fake_acompletion(**kwargs):
         assert kwargs["response_format"] is ReviewResult
+        assert kwargs["max_tokens"] == module.MAX_PROVIDER_REVIEW_OUTPUT_TOKENS
         return fake_response(
             json.dumps(
                 {

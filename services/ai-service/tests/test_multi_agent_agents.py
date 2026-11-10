@@ -1,16 +1,22 @@
 """Tests for provider-independent multi-agent role agents."""
 
+import json
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
 
 from app.multi_agent.agents import (
+    DependencyOutputs,
+    AnalystAgent,
     ExecutorAgent,
+    ResearcherAgent,
     MemoryAgent,
     PlannerAgent,
     ReviewerAgent,
+    WriterAgent,
 )
 from app.multi_agent.contracts import (
     PlanStep,
@@ -135,6 +141,157 @@ async def test_executor_rejects_oversized_output():
                 id="work",
                 objective="Do work",
                 expected_output="Output",
+            ),
+            {},
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "agent_class"),
+    [
+        ("research", ResearcherAgent),
+        ("analyze", AnalystAgent),
+        ("write", WriterAgent),
+    ],
+)
+async def test_specialist_agents_validate_output_and_copy_dependencies(
+    method, agent_class
+):
+    evidence_ref = str(uuid.uuid4())
+
+    async def operation(step, dependency_outputs):
+        dependency_outputs["injected"] = "provider mutation"
+        return {
+            "content": f"Completed {method}",
+            "caveats": ["Limited to supplied evidence"],
+            "evidence_refs": [evidence_ref],
+        }
+
+    provider = SimpleNamespace(**{method: AsyncMock(side_effect=operation)})
+    agent = agent_class(provider)
+    dependencies = DependencyOutputs(
+        {
+            "memory": json.dumps({
+                "evidence": [{"chunk_id": evidence_ref}],
+            })
+        },
+        evidence_refs={evidence_ref},
+    )
+
+    result = await getattr(agent, method)(
+        PlanStep(
+            id="specialist",
+            objective=f"Perform {method}",
+            expected_output="Structured result",
+        ),
+        dependencies,
+    )
+
+    decoded = json.loads(result)
+    assert decoded["content"] == f"Completed {method}"
+    assert decoded["caveats"] == ["Limited to supplied evidence"]
+    assert decoded["evidence_refs"] == [evidence_ref]
+    assert "injected" not in dependencies
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "agent_class"),
+    [
+        ("research", ResearcherAgent),
+        ("analyze", AnalystAgent),
+        ("write", WriterAgent),
+    ],
+)
+async def test_specialist_agents_reject_unsupported_evidence_refs(
+    method, agent_class
+):
+    provider = SimpleNamespace(
+        **{
+            method: AsyncMock(return_value={
+                "content": "Unsupported claim",
+                "evidence_refs": [str(uuid.uuid4())],
+            })
+        }
+    )
+    agent = agent_class(provider)
+
+    with pytest.raises(ValueError, match="unsupported evidence references"):
+        await getattr(agent, method)(
+            PlanStep(
+                id="specialist",
+                objective="Perform specialist work",
+                expected_output="Structured result",
+            ),
+            {"memory": json.dumps({"evidence": []})},
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "agent_class"),
+    [
+        ("research", ResearcherAgent),
+        ("analyze", AnalystAgent),
+        ("write", WriterAgent),
+    ],
+)
+@pytest.mark.parametrize(
+    "dependency_payload",
+    [
+        lambda ref: {"evidence": [{"chunk_id": "not-a-uuid"}]},
+        lambda ref: {"evidence": [], "evidence_refs": [ref]},
+    ],
+)
+async def test_specialist_agents_reject_untrusted_dependency_references(
+    method, agent_class, dependency_payload
+):
+    evidence_ref = str(uuid.uuid4())
+    provider = SimpleNamespace(
+        **{
+            method: AsyncMock(return_value={
+                "content": "Unsupported provenance",
+                "evidence_refs": [evidence_ref],
+            })
+        }
+    )
+    agent = agent_class(provider)
+
+    with pytest.raises(ValueError, match="unsupported evidence references"):
+        await getattr(agent, method)(
+            PlanStep(
+                id="specialist",
+                objective="Perform specialist work",
+                expected_output="Structured result",
+            ),
+            {"upstream": json.dumps(dependency_payload(evidence_ref))},
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "agent_class"),
+    [
+        ("research", ResearcherAgent),
+        ("analyze", AnalystAgent),
+        ("write", WriterAgent),
+    ],
+)
+async def test_specialist_agents_reject_invalid_provider_output(
+    method, agent_class
+):
+    provider = SimpleNamespace(
+        **{method: AsyncMock(return_value={"unexpected": "field"})}
+    )
+    agent = agent_class(provider)
+
+    with pytest.raises(ValidationError):
+        await getattr(agent, method)(
+            PlanStep(
+                id="specialist",
+                objective="Perform specialist work",
+                expected_output="Structured result",
             ),
             {},
         )

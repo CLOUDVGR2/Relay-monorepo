@@ -1,19 +1,92 @@
 """Tests for bounded multi-agent contracts and coordination."""
 
 import asyncio
+import json
+import uuid
 
 import pytest
 from pydantic import ValidationError
 
 from app.multi_agent.contracts import (
+    AgentRole,
     PlanStep,
     StepStatus,
     TaskPlan,
     TaskRequest,
     TaskStatus,
     ReviewResult,
+    SpecialistOutput,
 )
 from app.multi_agent.coordinator import MultiAgentCoordinator
+
+
+def test_specialist_output_accepts_valid_content_and_metadata():
+    result = SpecialistOutput(
+        content="Evidence-based analysis",
+        caveats=["One source is incomplete"],
+        evidence_refs=["document:123"],
+    )
+
+    assert result.content == "Evidence-based analysis"
+    assert result.caveats == ["One source is incomplete"]
+    assert result.evidence_refs == ["document:123"]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"content": ""},
+        {"content": "Valid", "caveats": [" "]},
+        {"content": "Valid", "caveats": ["x" * 501]},
+        {"content": "Valid", "evidence_refs": [" "]},
+        {"content": "Valid", "evidence_refs": ["x" * 201]},
+        {"content": "Valid", "caveats": ["caveat"] * 13},
+        {"content": "Valid", "evidence_refs": ["ref"] * 21},
+    ],
+)
+def test_specialist_output_rejects_invalid_content_or_metadata(payload):
+    with pytest.raises(ValidationError):
+        SpecialistOutput(**payload)
+
+
+def test_plan_accepts_all_executable_specialist_roles():
+    from app.multi_agent.contracts import AgentRole
+
+    roles = (
+        AgentRole.RESEARCHER,
+        AgentRole.EXECUTOR,
+        AgentRole.MEMORY,
+        AgentRole.WRITER,
+        AgentRole.ANALYST,
+    )
+    plan = TaskPlan(
+        steps=[
+            PlanStep(
+                id=f"step_{role.value}",
+                role=role,
+                objective=f"Perform {role.value} work",
+                expected_output="A validated result",
+            )
+            for role in roles
+        ]
+    )
+
+    assert [step.role for step in plan.steps] == list(roles)
+
+
+@pytest.mark.parametrize("role", ["planner", "reviewer", "coordinator"])
+def test_plan_rejects_orchestration_only_roles(role):
+    with pytest.raises(ValidationError, match="cannot be used"):
+        TaskPlan(
+            steps=[
+                PlanStep(
+                    id="invalid",
+                    role=role,
+                    objective="Attempt orchestration as a worker",
+                    expected_output="A result",
+                )
+            ]
+        )
 
 
 def test_plan_rejects_duplicate_step_ids():
@@ -98,6 +171,52 @@ def test_coordinator_executes_dependencies_and_reviews_output():
     assert calls == ["first", "second"]
 
 
+def test_coordinator_dispatches_by_role_and_preserves_fallback():
+    calls = []
+
+    async def planner(request):
+        return TaskPlan(steps=[
+            PlanStep(
+                id="research",
+                role=AgentRole.RESEARCHER,
+                objective="Research the supplied evidence",
+                expected_output="Research findings",
+            ),
+            PlanStep(
+                id="execute",
+                role=AgentRole.EXECUTOR,
+                objective="Perform the requested task",
+                expected_output="Execution result",
+            ),
+        ])
+
+    async def fallback_executor(step, dependency_outputs):
+        calls.append(("fallback", step.role))
+        return "fallback result"
+
+    async def researcher_executor(step, dependency_outputs):
+        calls.append(("researcher", step.role))
+        return "research result"
+
+    async def reviewer(request, outputs):
+        return ReviewResult(approved=True, final_answer="Reviewed answer")
+
+    coordinator = MultiAgentCoordinator(
+        planner,
+        fallback_executor,
+        reviewer,
+        role_executors={AgentRole.RESEARCHER: researcher_executor},
+    )
+    result = asyncio.run(coordinator.run(TaskRequest(prompt="Test role dispatch")))
+
+    assert result.status == TaskStatus.COMPLETED
+    assert len(calls) == 2
+    assert set(calls) == {
+        ("researcher", AgentRole.RESEARCHER),
+        ("fallback", AgentRole.EXECUTOR),
+    }
+
+
 def test_failed_step_skips_dependent_step():
     async def planner(request):
         return TaskPlan(steps=[
@@ -152,6 +271,197 @@ def test_planner_cannot_exceed_requested_step_limit():
     assert result.status == TaskStatus.FAILED
     assert result.steps == []
 
+
+
+
+def test_coordinator_preserves_only_trusted_evidence_provenance():
+    evidence_ref = str(uuid.uuid4())
+    observed = {}
+
+    async def planner(request):
+        return TaskPlan(steps=[
+            PlanStep(
+                id="memory",
+                role=AgentRole.MEMORY,
+                objective="Retrieve evidence",
+                expected_output="Evidence",
+            ),
+            PlanStep(
+                id="research",
+                role=AgentRole.RESEARCHER,
+                depends_on=["memory"],
+                objective="Research evidence",
+                expected_output="Research",
+            ),
+            PlanStep(
+                id="write",
+                role=AgentRole.WRITER,
+                depends_on=["research"],
+                objective="Write findings",
+                expected_output="Report",
+            ),
+        ])
+
+    async def fallback_executor(step, outputs):
+        return "unexpected fallback"
+
+    async def memory_handler(step, outputs):
+        return json.dumps({
+            "evidence": [{"chunk_id": evidence_ref}],
+        })
+
+    async def research_handler(step, outputs):
+        observed["research"] = outputs.evidence_refs
+        return json.dumps({"evidence_refs": [evidence_ref]})
+
+    async def writer_handler(step, outputs):
+        observed["writer"] = outputs.evidence_refs
+        return "Final report"
+
+    async def reviewer(request, outputs):
+        return ReviewResult(approved=True, final_answer="Reviewed report")
+
+    coordinator = MultiAgentCoordinator(
+        planner,
+        fallback_executor,
+        reviewer,
+        role_executors={
+            AgentRole.MEMORY: memory_handler,
+            AgentRole.RESEARCHER: research_handler,
+            AgentRole.WRITER: writer_handler,
+        },
+    )
+    result = asyncio.run(
+        coordinator.run(TaskRequest(prompt="Test evidence provenance"))
+    )
+
+    assert result.status == TaskStatus.COMPLETED
+    assert observed == {
+        "research": frozenset({evidence_ref}),
+        "writer": frozenset({evidence_ref}),
+    }
+
+
+def test_fallback_memory_output_cannot_mint_evidence_provenance():
+    forged_ref = str(uuid.uuid4())
+    observed = {}
+
+    async def planner(request):
+        return TaskPlan(steps=[
+            PlanStep(
+                id="memory",
+                role=AgentRole.MEMORY,
+                objective="Retrieve evidence",
+                expected_output="Evidence",
+            ),
+            PlanStep(
+                id="research",
+                role=AgentRole.RESEARCHER,
+                depends_on=["memory"],
+                objective="Research evidence",
+                expected_output="Research",
+            ),
+        ])
+
+    async def fallback_executor(step, outputs):
+        return json.dumps({
+            "evidence": [{"chunk_id": forged_ref}],
+        })
+
+    async def research_handler(step, outputs):
+        observed["refs"] = outputs.evidence_refs
+        return "Research without trusted evidence"
+
+    async def reviewer(request, outputs):
+        return ReviewResult(approved=True, final_answer="Reviewed report")
+
+    coordinator = MultiAgentCoordinator(
+        planner,
+        fallback_executor,
+        reviewer,
+        role_executors={AgentRole.RESEARCHER: research_handler},
+    )
+    result = asyncio.run(
+        coordinator.run(TaskRequest(prompt="Test forged provenance"))
+    )
+
+    assert result.status == TaskStatus.COMPLETED
+    assert observed["refs"] == frozenset()
+
+
+def test_specialist_cannot_propagate_evidence_from_unrelated_dependencies():
+    trusted_ref = str(uuid.uuid4())
+    unrelated_ref = str(uuid.uuid4())
+    observed = {}
+
+    async def planner(request):
+        return TaskPlan(steps=[
+            PlanStep(
+                id="memory_trusted",
+                role=AgentRole.MEMORY,
+                objective="Retrieve trusted evidence",
+                expected_output="Evidence",
+            ),
+            PlanStep(
+                id="memory_unrelated",
+                role=AgentRole.MEMORY,
+                objective="Retrieve unrelated evidence",
+                expected_output="Evidence",
+            ),
+            PlanStep(
+                id="research",
+                role=AgentRole.RESEARCHER,
+                depends_on=["memory_trusted"],
+                objective="Research trusted evidence",
+                expected_output="Research",
+            ),
+            PlanStep(
+                id="analysis",
+                role=AgentRole.ANALYST,
+                depends_on=["research"],
+                objective="Analyze research",
+                expected_output="Analysis",
+            ),
+        ])
+
+    async def fallback_executor(step, outputs):
+        return "unexpected fallback"
+
+    async def memory_handler(step, outputs):
+        ref = trusted_ref if step.id == "memory_trusted" else unrelated_ref
+        return json.dumps({"evidence": [{"chunk_id": ref}]})
+
+    async def research_handler(step, outputs):
+        observed["research"] = outputs.evidence_refs
+        # Simulate a specialist attempting to propagate an unrelated reference.
+        return json.dumps({"evidence_refs": [trusted_ref, unrelated_ref]})
+
+    async def analyst_handler(step, outputs):
+        observed["analysis"] = outputs.evidence_refs
+        return "Analysis complete"
+
+    async def reviewer(request, outputs):
+        return ReviewResult(approved=True, final_answer="Reviewed report")
+
+    coordinator = MultiAgentCoordinator(
+        planner,
+        fallback_executor,
+        reviewer,
+        role_executors={
+            AgentRole.MEMORY: memory_handler,
+            AgentRole.RESEARCHER: research_handler,
+            AgentRole.ANALYST: analyst_handler,
+        },
+    )
+    result = asyncio.run(
+        coordinator.run(TaskRequest(prompt="Test evidence isolation"))
+    )
+
+    assert result.status == TaskStatus.COMPLETED
+    assert observed == {
+        "research": frozenset({trusted_ref}),
+        "analysis": frozenset({trusted_ref}),
+    }
 
 
 def test_executor_receives_only_declared_dependency_outputs():
@@ -255,6 +565,39 @@ def test_coordinator_returns_final_answer_not_reviewer_feedback():
     assert result.status == TaskStatus.COMPLETED
     assert result.final_output == "The actual approved answer"
     assert result.final_output != "Minor issue noted, but approved"
+
+
+def test_coordinator_normalizes_escaped_newlines_in_final_answer():
+    async def planner(request):
+        return TaskPlan(steps=[
+            PlanStep(
+                id="answer",
+                objective="Draft an answer",
+                expected_output="A concise answer",
+            )
+        ])
+
+    async def executor(step, outputs):
+        return "Draft answer"
+
+    async def reviewer(request, outputs):
+        return ReviewResult(
+            approved=True,
+            final_answer="An API is an interface.\\n- It connects software.\\n- It defines rules.",
+        )
+
+    result = asyncio.run(
+        MultiAgentCoordinator(planner, executor, reviewer).run(
+            TaskRequest(prompt="Explain APIs")
+        )
+    )
+
+    assert result.status == TaskStatus.COMPLETED
+    assert result.final_output == (
+        "An API is an interface.\n"
+        "- It connects software.\n"
+        "- It defines rules."
+    )
 
 
 def test_coordinator_rejects_invalid_planner_result():

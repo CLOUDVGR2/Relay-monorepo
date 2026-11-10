@@ -78,7 +78,7 @@ def test_task_routes_reject_invalid_relay_identity(
         {"prompt": "Do work", "max_steps": 0},
         {"prompt": "Do work", "max_steps": 13},
         {"prompt": "Do work", "timeout_seconds": 0},
-        {"prompt": "Do work", "timeout_seconds": 121},
+        {"prompt": "Do work", "timeout_seconds": 241},
         {"prompt": "Do work", "unexpected": True},
     ],
 )

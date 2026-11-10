@@ -4,9 +4,12 @@ import os
 from dataclasses import dataclass
 
 from app.multi_agent.agents import (
+    AnalystProvider,
     ExecutorProvider,
     PlannerProvider,
+    ResearcherProvider,
     ReviewerProvider,
+    WriterProvider,
 )
 from app.multi_agent.providers import (
     LiteLLMMultiAgentProvider,
@@ -18,6 +21,9 @@ from app.multi_agent.providers import (
 class MultiAgentProviders:
     planner: PlannerProvider
     executor: ExecutorProvider
+    researcher: ResearcherProvider
+    analyst: AnalystProvider
+    writer: WriterProvider
     reviewer: ReviewerProvider
 
 
@@ -38,5 +44,8 @@ def get_multi_agent_providers() -> MultiAgentProviders:
     return MultiAgentProviders(
         planner=provider,
         executor=provider,
+        researcher=provider,
+        analyst=provider,
+        writer=provider,
         reviewer=provider,
     )

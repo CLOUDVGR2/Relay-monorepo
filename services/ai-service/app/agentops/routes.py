@@ -9,7 +9,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Security
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Security
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +21,7 @@ from app.agentops.workflow import (
     _trace_callback,
     run_investigation,
 )
+from app.core.openapi import TENANT_ERROR_RESPONSES, error_response
 from app.core.security import require_internal_token
 from app.db.session import AsyncSessionLocal, get_db
 from app.models.incident import Incident, IncidentEvidence
@@ -36,6 +37,7 @@ router = APIRouter(
     prefix="/v1/incidents",
     tags=["incident-intelligence"],
     dependencies=[Security(require_internal_token)],
+    responses=TENANT_ERROR_RESPONSES,
 )
 
 APPROVAL_TTL = timedelta(minutes=10)
@@ -147,9 +149,13 @@ async def _get_incident(
     return incident
 
 
-@router.post("", response_model=IncidentResponse, status_code=201)
+@router.post("", response_model=IncidentResponse, status_code=201,
+    summary='Create Incident',
+    description='Creates a tenant-scoped incident using the supported api-latency-spike-v1 scenario. The service initializes the incident and its associated evidence records. This endpoint does not execute remediation.',
+    response_description='The newly created incident, including its identifier and lifecycle status.',
+)
 async def create_incident(
-    payload: IncidentCreate,
+    payload: IncidentCreate = Body(description='Incident creation parameters. Currently supports the api-latency-spike-v1 scenario.'),
     relay_user_id: str = Header(alias="X-Relay-User-Id"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -183,7 +189,11 @@ async def create_incident(
     return _response(incident)
 
 
-@router.get("", response_model=list[IncidentResponse])
+@router.get("", response_model=list[IncidentResponse],
+    summary='List Incidents',
+    description='Returns the most recently created incidents belonging to the tenant resolved from X-Relay-User-Id. The limit defaults to 50 and is capped at 100. Results are ordered by creation time, newest first.',
+    response_description="The tenant's incidents, ordered from newest to oldest.",
+)
 async def list_incidents(
     relay_user_id: str = Header(alias="X-Relay-User-Id"),
     limit: int = 50,
@@ -200,7 +210,15 @@ async def list_incidents(
     return [_response(item) for item in result.all()]
 
 
-@router.get("/{incident_id}", response_model=IncidentResponse)
+@router.get(
+    "/{incident_id}",
+    response_model=IncidentResponse,
+    responses={404: error_response("Incident not found.")},
+
+    summary='Get Incident',
+    description='Retrieves an incident by UUID within the tenant resolved from X-Relay-User-Id. An incident belonging to another tenant is not exposed.',
+    response_description='The requested tenant-scoped incident.',
+)
 async def get_incident(
     incident_id: uuid.UUID,
     relay_user_id: str = Header(alias="X-Relay-User-Id"),
@@ -211,7 +229,18 @@ async def get_incident(
     return _response(incident)
 
 
-@router.post("/{incident_id}/investigate", response_model=IncidentResponse)
+@router.post(
+    "/{incident_id}/investigate",
+    response_model=IncidentResponse,
+    responses={
+        404: error_response("Incident not found."),
+        502: error_response("Incident investigation or evidence validation failed."),
+    },
+
+    summary='Investigate Incident',
+    description='Runs the configured incident-investigation workflow against the incident scenario and its evidence. The resulting investigation contains evidence-backed hypotheses and a proposed remediation. Investigation does not approve or execute the proposed action. The incident must be in a state that permits investigation.',
+    response_description='The incident updated with investigation findings and proposed remediation.',
+)
 async def investigate(
     incident_id: uuid.UUID,
     relay_user_id: str = Header(alias="X-Relay-User-Id"),
@@ -341,7 +370,15 @@ async def investigate(
     return _response(incident)
 
 
-@router.post("/{incident_id}/approve", response_model=ApprovalResponse)
+@router.post(
+    "/{incident_id}/approve",
+    response_model=ApprovalResponse,
+    responses={404: error_response("Incident not found.")},
+
+    summary='Approve Remediation',
+    description='Approves the proposed remediation for an investigated incident. Returns a short-lived approval token that must be supplied to the execution endpoint. Approval tokens expire after 10 minutes. Approval does not execute the remediation.',
+    response_description='The approval status, one-time approval token, and expiration timestamp.',
+)
 async def approve_remediation(
     incident_id: uuid.UUID,
     relay_user_id: str = Header(alias="X-Relay-User-Id"),
@@ -377,10 +414,22 @@ async def approve_remediation(
     }
 
 
-@router.post("/{incident_id}/execute", response_model=IncidentResponse)
+@router.post(
+    "/{incident_id}/execute",
+    response_model=IncidentResponse,
+    responses={
+        403: error_response("The approval token is invalid or expired."),
+        404: error_response("Incident not found."),
+        500: error_response("Simulated remediation execution failed."),
+    },
+
+    summary='Execute Approved Remediation',
+    description="Executes the approved remediation through the service's controlled simulation. Requires a valid, unexpired approval token associated with the incident's current proposed action. The approval is consumed before execution. This workflow simulates remediation and does not modify real infrastructure.",
+    response_description='The incident with the simulated execution result and verification status.',
+)
 async def execute_remediation(
     incident_id: uuid.UUID,
-    payload: ExecuteRequest,
+    payload: ExecuteRequest = Body(description="The approval token returned by the incident remediation approval endpoint. The token must be valid, unexpired, and associated with the incident's current approved action."),
     relay_user_id: str = Header(alias="X-Relay-User-Id"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -453,7 +502,15 @@ async def execute_remediation(
     return _response(incident)
 
 
-@router.post("/{incident_id}/recover", response_model=IncidentResponse)
+@router.post(
+    "/{incident_id}/recover",
+    response_model=IncidentResponse,
+    responses={404: error_response("Incident not found.")},
+
+    summary='Recover Interrupted Execution',
+    description='Marks an execution as interrupted when it has remained in the executing state for at least two minutes. Recovery invalidates any remaining approval token and records an audit event. It never automatically replays the remediation; the outcome requires review.',
+    response_description='The incident updated to reflect interrupted execution.',
+)
 async def recover_interrupted_execution(
     incident_id: uuid.UUID,
     relay_user_id: str = Header(alias="X-Relay-User-Id"),

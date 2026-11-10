@@ -1,9 +1,15 @@
 """Deterministic, bounded coordinator for the multi-agent core."""
 
 import asyncio
-from collections.abc import Awaitable, Callable
+import json
+import logging
+import uuid
+from collections.abc import Awaitable, Callable, Mapping
+
+from app.multi_agent.agents import DependencyOutputs
 
 from app.multi_agent.contracts import (
+    AgentRole,
     PlanStep,
     ReviewResult,
     StepResult,
@@ -20,7 +26,63 @@ Executor = Callable[[PlanStep, dict[str, str]], Awaitable[str]]
 Reviewer = Callable[[TaskRequest, dict[str, str]], Awaitable[ReviewResult]]
 ProgressCallback = Callable[[dict[str, object]], Awaitable[None]]
 
+logger = logging.getLogger(__name__)
+
 MAX_STEP_OUTPUT_CHARS = 8_000
+
+
+def _canonical_evidence_refs(output: str) -> set[str]:
+    """Extract canonical evidence UUIDs from a trusted Memory result."""
+    try:
+        payload = json.loads(output)
+    except (TypeError, ValueError):
+        return set()
+
+    if not isinstance(payload, dict):
+        return set()
+
+    evidence = payload.get("evidence")
+    if not isinstance(evidence, list):
+        return set()
+
+    refs: set[str] = set()
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        for field in ("chunk_id", "document_id"):
+            value = item.get(field)
+            if not isinstance(value, str):
+                continue
+            try:
+                parsed = uuid.UUID(value)
+            except (ValueError, AttributeError):
+                continue
+            if str(parsed) == value:
+                refs.add(value)
+    return refs
+
+
+def _propagated_evidence_refs(
+    output: str,
+    inherited_refs: set[str],
+) -> set[str]:
+    """Propagate only inherited references explicitly retained by a specialist."""
+    try:
+        payload = json.loads(output)
+    except (TypeError, ValueError):
+        return set()
+
+    if not isinstance(payload, dict):
+        return set()
+
+    proposed = payload.get("evidence_refs")
+    if not isinstance(proposed, list):
+        return set()
+
+    return {
+        ref for ref in proposed
+        if isinstance(ref, str) and ref in inherited_refs
+    }
 
 
 class MultiAgentCoordinator:
@@ -33,12 +95,14 @@ class MultiAgentCoordinator:
         reviewer: Reviewer,
         *,
         max_concurrency: int = 3,
+        role_executors: Mapping[AgentRole, Executor] | None = None,
     ) -> None:
         if isinstance(max_concurrency, bool) or not 1 <= max_concurrency <= 4:
             raise ValueError("max_concurrency must be between 1 and 4")
 
         self._planner = planner
         self._executor = executor
+        self._role_executors = dict(role_executors or {})
         self._reviewer = reviewer
         self._max_concurrency = max_concurrency
 
@@ -93,6 +157,7 @@ class MultiAgentCoordinator:
                     status=TaskStatus.FAILED,
                     steps=[],
                     final_output=None,
+                    error_message="I couldn't create an execution plan for this task. Please try again with more detail.",
                 )
 
             # A timeout may interrupt a concurrent batch. Keep completed
@@ -126,10 +191,15 @@ class MultiAgentCoordinator:
                 status=TaskStatus.FAILED,
                 steps=[results[step.id] for step in plan.steps],
                 final_output=None,
+                error_message="The task took longer than the allowed time. Please simplify it and try again.",
             )
         except asyncio.CancelledError:
             raise
         except Exception:
+            logger.exception(
+                "multi_agent_coordinator_failed",
+                extra={"stage": "planning_or_coordination"},
+            )
             # Persist a safe terminal snapshot even when planning or
             # coordination fails unexpectedly. Never expose exception text.
             if on_progress is not None:
@@ -160,6 +230,7 @@ class MultiAgentCoordinator:
                     if step.id in results
                 ],
                 final_output=None,
+                error_message="The task encountered an internal execution problem. Please try again.",
             )
 
     async def _notify_progress(
@@ -209,6 +280,7 @@ class MultiAgentCoordinator:
                 await self._notify_progress(on_progress, snapshot)
         pending = set(by_id)
         completed: dict[str, str] = {}
+        provenance_by_step: dict[str, set[str]] = {}
         semaphore = asyncio.Semaphore(self._max_concurrency)
 
         async def execute(step: PlanStep) -> tuple[str, StepResult]:
@@ -216,11 +288,21 @@ class MultiAgentCoordinator:
                 try:
                     progress_statuses[step.id] = StepStatus.RUNNING.value
                     await emit("executing")
-                    dependency_outputs = {
-                        dependency: completed[dependency]
-                        for dependency in step.depends_on
-                    }
-                    output = await self._executor(step, dependency_outputs)
+                    dependency_refs = set().union(
+                        *(
+                            provenance_by_step.get(dependency, set())
+                            for dependency in step.depends_on
+                        )
+                    )
+                    dependency_outputs = DependencyOutputs(
+                        {
+                            dependency: completed[dependency]
+                            for dependency in step.depends_on
+                        },
+                        evidence_refs=dependency_refs,
+                    )
+                    handler = self._role_executors.get(step.role, self._executor)
+                    output = await handler(step, dependency_outputs)
                     if not isinstance(output, str) or not output.strip():
                         raise ValueError("empty_output")
                     if len(output) > MAX_STEP_OUTPUT_CHARS:
@@ -235,6 +317,13 @@ class MultiAgentCoordinator:
                 except asyncio.CancelledError:
                     raise
                 except Exception:
+                    logger.exception(
+                        "multi_agent_step_execution_failed",
+                        extra={
+                            "step_id": step.id,
+                            "role": step.role.value,
+                        },
+                    )
                     result = StepResult(
                         step_id=step.id,
                         role=step.role,
@@ -288,7 +377,30 @@ class MultiAgentCoordinator:
             for step_id, result in batch_results:
                 pending.remove(step_id)
                 if result.status == StepStatus.COMPLETED:
-                    completed[step_id] = result.output or ""
+                    output = result.output or ""
+                    completed[step_id] = output
+                    step = by_id[step_id]
+                    if (
+                        step.role == AgentRole.MEMORY
+                        and step.role in self._role_executors
+                    ):
+                        provenance_by_step[step_id] = (
+                            _canonical_evidence_refs(output)
+                        )
+                    elif step.role in {
+                        AgentRole.RESEARCHER,
+                        AgentRole.ANALYST,
+                        AgentRole.WRITER,
+                    }:
+                        inherited_refs = set().union(
+                            *(
+                                provenance_by_step.get(dependency, set())
+                                for dependency in step.depends_on
+                            )
+                        )
+                        provenance_by_step[step_id] = (
+                            _propagated_evidence_refs(output, inherited_refs)
+                        )
 
         ordered_results = [results[step.id] for step in plan.steps]
         if any(item.status != StepStatus.COMPLETED for item in ordered_results):
@@ -297,6 +409,7 @@ class MultiAgentCoordinator:
                 status=TaskStatus.FAILED,
                 steps=ordered_results,
                 final_output=None,
+                error_message="One or more task steps could not be completed. Review the step statuses and try again.",
             )
 
         await emit("reviewing")
@@ -305,11 +418,13 @@ class MultiAgentCoordinator:
         except asyncio.CancelledError:
             raise
         except Exception:
+            logger.exception("multi_agent_review_failed")
             await emit("failed")
             return TaskResult(
                 status=TaskStatus.FAILED,
                 steps=ordered_results,
                 final_output=None,
+                error_message="The task could not produce a result that passed review. Please add context and try again.",
             )
 
         if not isinstance(review, ReviewResult) or not review.approved:
@@ -318,15 +433,18 @@ class MultiAgentCoordinator:
                 status=TaskStatus.FAILED,
                 steps=ordered_results,
                 final_output=None,
+                error_message="The task result did not pass review. Please add context and try again.",
             )
 
         final_output = (review.final_answer or "").strip()
+        final_output = final_output.replace("\\r\\n", "\n").replace("\\n", "\n")
         if not final_output:
             await emit("failed")
             return TaskResult(
                 status=TaskStatus.FAILED,
                 steps=ordered_results,
                 final_output=None,
+                error_message="The task review did not produce a final answer. Please try again.",
             )
 
         await emit("completed")

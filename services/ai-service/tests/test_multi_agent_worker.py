@@ -7,8 +7,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.multi_agent.contracts import TaskRequest, TaskResult, TaskStatus
-from app.multi_agent.worker import MultiAgentWorker
+from app.multi_agent.contracts import (
+    MAX_STEP_OUTPUT_CHARS,
+    AgentRole,
+    PlanStep,
+    TaskRequest,
+    TaskResult,
+    TaskStatus,
+)
+import app.multi_agent.worker as worker_module
+from app.multi_agent.worker import MultiAgentWorker, build_coordinator
 
 
 def make_session_factory():
@@ -31,6 +39,88 @@ def make_task():
         request_json={"prompt": "test task"},
         lease_token=uuid.uuid4(),
     )
+
+
+@pytest.mark.asyncio
+async def test_memory_handler_is_tenant_scoped_and_bounds_serialized_evidence(
+    monkeypatch,
+):
+    tenant_id = uuid.uuid4()
+    db = MagicMock()
+    session_closed = []
+
+    class SessionContext:
+        async def __aenter__(self):
+            return db
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            session_closed.append(True)
+            return False
+
+    session_factory = MagicMock(side_effect=SessionContext)
+
+    class FakeMemoryAgent:
+        async def retrieve(self, supplied_db, *, tenant_id, query):
+            assert supplied_db is db
+            assert tenant_id == expected_tenant_id
+            assert query == "Find relevant project decisions"
+            assert session_closed == []
+            return [
+                SimpleNamespace(
+                    chunk_id=uuid.uuid4(),
+                    document_id=uuid.uuid4(),
+                    title="Project evidence",
+                    source_uri="https://relay.example/evidence",
+                    chunk_index=index,
+                    start=index * 2000,
+                    end=(index + 1) * 2000,
+                    score=0.95,
+                    content="evidence " * 500,
+                )
+                for index in range(5)
+            ]
+
+    expected_tenant_id = tenant_id
+    monkeypatch.setattr(worker_module, "MemoryAgent", FakeMemoryAgent)
+    monkeypatch.setattr(
+        worker_module,
+        "get_multi_agent_providers",
+        lambda: SimpleNamespace(
+            planner=object(),
+            executor=object(),
+            researcher=object(),
+            analyst=object(),
+            writer=object(),
+            reviewer=object(),
+        ),
+    )
+
+    coordinator = build_coordinator(
+        session_factory=session_factory,
+        tenant_id=tenant_id,
+    )
+    handler = coordinator._role_executors[AgentRole.MEMORY]
+    step = PlanStep(
+        id="memory",
+        role=AgentRole.MEMORY,
+        objective="Find relevant project decisions",
+        expected_output="Tenant-scoped evidence",
+    )
+
+    output = await handler(step, {})
+
+    import json
+
+    parsed = json.loads(output)
+    assert len(output) <= MAX_STEP_OUTPUT_CHARS
+    assert parsed["evidence"]
+    assert parsed["evidence"][0]["chunk_id"]
+    assert parsed["evidence"][0]["document_id"]
+    assert parsed["evidence"][0]["source_uri"] == (
+        "https://relay.example/evidence"
+    )
+    assert session_closed == [True]
+    session_factory.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -150,6 +240,48 @@ async def test_heartbeat_stops_when_lease_is_lost(monkeypatch):
         worker._heartbeat(uuid.uuid4(), uuid.uuid4()), timeout=1
     )
     repository.renew_lease.assert_awaited_once()
+
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_retries_invalidated_database_connection(monkeypatch):
+    factory, _ = make_session_factory()
+    repository = MagicMock()
+
+    connection_error = worker_module.DBAPIError(
+        "SELECT 1",
+        {},
+        OSError("simulated database connection loss"),
+        connection_invalidated=True,
+    )
+    repository.renew_lease = AsyncMock(
+        side_effect=[connection_error, True, False]
+    )
+
+    sleep_calls = []
+
+    async def no_wait(seconds):
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", no_wait)
+
+    worker = MultiAgentWorker(
+        factory,
+        repository=repository,
+        worker_id="worker-test",
+    )
+
+    await asyncio.wait_for(
+        worker._heartbeat(uuid.uuid4(), uuid.uuid4()),
+        timeout=2,
+    )
+
+    assert repository.renew_lease.await_count == 3
+    assert sleep_calls == [
+        worker_module.HEARTBEAT_INTERVAL_SECONDS,
+        1.0,
+        worker_module.HEARTBEAT_INTERVAL_SECONDS,
+    ]
 
 
 def test_worker_rejects_unbounded_poll_interval():
@@ -654,3 +786,51 @@ async def test_redis_publish_failure_does_not_stop_progress_persistence(
     assert repository.get_relay_user_id.await_count == 2
     assert publish_attempts == 2
     repository.complete.assert_awaited_once()
+
+@pytest.mark.asyncio
+async def test_process_heartbeat_publishes_worker_state_and_ttl():
+    import json
+
+    factory, _ = make_session_factory()
+    redis = MagicMock()
+    redis.set = AsyncMock()
+    worker = MultiAgentWorker(
+        factory,
+        worker_id="worker-test",
+        redis_client=redis,
+    )
+    worker._health_state = "idle"
+    worker._last_poll_at = "2026-11-08T07:00:00+00:00"
+
+    await worker._publish_process_heartbeat()
+
+    redis.set.assert_awaited_once()
+    args, kwargs = redis.set.await_args
+    assert args[0] == worker_module.PROCESS_HEARTBEAT_KEY
+    payload = json.loads(args[1])
+    assert payload["worker"] == "multi-agent-worker"
+    assert payload["worker_id"] == "worker-test"
+    assert payload["status"] == "idle"
+    assert payload["last_poll_at"] == worker._last_poll_at
+    assert payload["last_poll_error"] is None
+    assert kwargs["ex"] == worker_module.PROCESS_HEARTBEAT_TTL_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_run_forever_removes_process_heartbeat_on_shutdown():
+    factory, _ = make_session_factory()
+    redis = MagicMock()
+    redis.set = AsyncMock()
+    redis.delete = AsyncMock()
+    worker = MultiAgentWorker(
+        factory,
+        worker_id="worker-test",
+        redis_client=redis,
+    )
+    worker.stop()
+
+    await worker.run_forever()
+
+    redis.delete.assert_awaited_once_with(
+        worker_module.PROCESS_HEARTBEAT_KEY
+    )

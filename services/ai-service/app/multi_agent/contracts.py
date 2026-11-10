@@ -21,10 +21,22 @@ class StrictModel(BaseModel):
 
 class AgentRole(StrEnum):
     PLANNER = "planner"
+    RESEARCHER = "researcher"
     EXECUTOR = "executor"
     MEMORY = "memory"
+    WRITER = "writer"
+    ANALYST = "analyst"
     REVIEWER = "reviewer"
     COORDINATOR = "coordinator"
+
+
+EXECUTABLE_AGENT_ROLES = frozenset({
+    AgentRole.RESEARCHER,
+    AgentRole.EXECUTOR,
+    AgentRole.MEMORY,
+    AgentRole.WRITER,
+    AgentRole.ANALYST,
+})
 
 
 class TaskStatus(StrEnum):
@@ -49,7 +61,7 @@ class TaskRequest(StrictModel):
         max_length=MAX_TASK_PROMPT_CHARS,
     )
     max_steps: int = Field(default=8, ge=1, le=MAX_PLAN_STEPS)
-    timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    timeout_seconds: float = Field(default=180.0, gt=0, le=240)
 
 
 class PlanStep(StrictModel):
@@ -68,6 +80,12 @@ class TaskPlan(StrictModel):
 
     @model_validator(mode="after")
     def validate_dependencies(self):
+        for step in self.steps:
+            if step.role not in EXECUTABLE_AGENT_ROLES:
+                raise ValueError(
+                    f"Role {step.role.value} cannot be used as an executable plan step"
+                )
+
         by_id = {step.id: step for step in self.steps}
 
         if len(by_id) != len(self.steps):
@@ -125,7 +143,24 @@ class ReviewResult(StrictModel):
     feedback: str = Field(default="", max_length=2_000)
 
 
+class SpecialistOutput(StrictModel):
+    """Validated, bounded output shared by specialist agents."""
+
+    content: str = Field(min_length=1, max_length=MAX_STEP_OUTPUT_CHARS)
+    caveats: list[str] = Field(default_factory=list, max_length=12)
+    evidence_refs: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_metadata(self):
+        if any(not item.strip() or len(item) > 500 for item in self.caveats):
+            raise ValueError("Specialist caveats must be non-empty and bounded")
+        if any(not item.strip() or len(item) > 200 for item in self.evidence_refs):
+            raise ValueError("Specialist evidence references must be non-empty and bounded")
+        return self
+
+
 class TaskResult(StrictModel):
     status: TaskStatus
     steps: list[StepResult] = Field(max_length=MAX_PLAN_STEPS)
     final_output: str | None = Field(default=None, max_length=MAX_STEP_OUTPUT_CHARS)
+    error_message: str | None = Field(default=None, max_length=500)

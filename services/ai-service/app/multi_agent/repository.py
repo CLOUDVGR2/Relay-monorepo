@@ -230,7 +230,7 @@ class MultiAgentTaskRepository:
                 or not step_id.replace("_", "").replace("-", "").isalnum()
                 or not step_id[0].islower()
                 or not isinstance(role, str)
-                or role not in {"planner", "executor", "memory", "reviewer", "coordinator"}
+                or role not in {"planner", "researcher", "executor", "memory", "writer", "analyst", "reviewer", "coordinator"}
                 or not isinstance(status, str)
                 or status not in allowed_statuses
                 or step_id in seen_step_ids
@@ -323,6 +323,7 @@ class MultiAgentTaskRepository:
         worker_id: str,
         lease_token: uuid.UUID,
         error_code: str,
+        result: dict[str, Any] | None = None,
     ) -> bool:
         if not error_code or len(error_code) > 80:
             raise ValueError("error_code must contain 1 to 80 characters")
@@ -334,7 +335,7 @@ class MultiAgentTaskRepository:
             worker_id=worker_id,
             lease_token=lease_token,
             status=TaskStatus.FAILED,
-            result_json=None,
+            result_json=result,
             error_code=error_code,
         )
 

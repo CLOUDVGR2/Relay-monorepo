@@ -1,0 +1,22 @@
+FROM python:3.12-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HOME=/home/worker/.cache/huggingface
+
+WORKDIR /app
+
+RUN useradd --create-home --uid 10001 worker \
+    && mkdir -p /home/worker/.cache/huggingface \
+    && chown -R worker:worker /home/worker
+
+COPY recording-worker-requirements.txt /app/requirements.txt
+
+RUN python -m pip install --no-cache-dir --upgrade pip \
+    && python -m pip install --no-cache-dir -r /app/requirements.txt
+
+COPY --chown=worker:worker app /app/app
+
+USER worker
+
+CMD ["python", "-m", "app.recordings.worker"]

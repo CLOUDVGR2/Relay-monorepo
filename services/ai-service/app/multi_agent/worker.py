@@ -1,7 +1,9 @@
 """Durable multi-agent worker with bounded polling and lease heartbeats."""
 
 import asyncio
+import json
 import logging
+from datetime import datetime, timezone
 import os
 import signal
 import socket
@@ -10,14 +12,24 @@ from collections.abc import Callable
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.exc import DBAPIError
 
 from app.db.session import AsyncSessionLocal
 from app.multi_agent.agents import (
+    AnalystAgent,
     ExecutorAgent,
+    MemoryAgent,
     PlannerAgent,
+    ResearcherAgent,
     ReviewerAgent,
+    WriterAgent,
 )
-from app.multi_agent.contracts import TaskRequest, TaskStatus
+from app.multi_agent.contracts import (
+    MAX_STEP_OUTPUT_CHARS,
+    AgentRole,
+    TaskRequest,
+    TaskStatus,
+)
 from app.multi_agent.coordinator import MultiAgentCoordinator
 from app.multi_agent.provider_factory import get_multi_agent_providers
 from app.multi_agent.repository import (
@@ -30,9 +42,13 @@ logger = logging.getLogger(__name__)
 
 POLL_INTERVAL_SECONDS = 1.0
 HEARTBEAT_INTERVAL_SECONDS = max(1.0, LEASE_SECONDS / 3)
+HEARTBEAT_DB_RETRY_DELAYS_SECONDS = (1.0, 2.0, 4.0)
 MAX_POLL_INTERVAL_SECONDS = 30.0
 RECOVERY_INTERVAL_SECONDS = 15.0
 MAX_RECOVERY_INTERVAL_SECONDS = 300.0
+PROCESS_HEARTBEAT_KEY = "multi-agent-worker:heartbeat"
+PROCESS_HEARTBEAT_INTERVAL_SECONDS = 5
+PROCESS_HEARTBEAT_TTL_SECONDS = 15
 
 
 def _recovery_interval_from_env() -> float:
@@ -54,13 +70,99 @@ def _recovery_interval_from_env() -> float:
     return interval
 
 
-def build_coordinator() -> MultiAgentCoordinator:
+def build_coordinator(
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    tenant_id: uuid.UUID,
+) -> MultiAgentCoordinator:
+    """Build a tenant-aware coordinator with isolated memory retrieval."""
     providers = get_multi_agent_providers()
+
+    async def retrieve_memory(step, dependency_outputs: dict[str, str]) -> str:
+        memory_agent = MemoryAgent()
+        async with session_factory() as db:
+            chunks = await memory_agent.retrieve(
+                db,
+                tenant_id=tenant_id,
+                query=step.objective,
+            )
+
+        evidence: list[dict[str, Any]] = []
+        payload = json.dumps({"evidence": evidence}, ensure_ascii=False)
+
+        for chunk in chunks:
+            candidate = {
+                "chunk_id": str(chunk.chunk_id),
+                "document_id": str(chunk.document_id),
+                "title": chunk.title[:200],
+                "source_uri": chunk.source_uri[:500] if chunk.source_uri else None,
+                "chunk_index": chunk.chunk_index,
+                "start": chunk.start,
+                "end": chunk.end,
+                "score": chunk.score,
+                "content": chunk.content[:1000],
+            }
+            proposed = json.dumps(
+                {"evidence": [*evidence, candidate]},
+                ensure_ascii=False,
+            )
+            if len(proposed) > MAX_STEP_OUTPUT_CHARS:
+                break
+            evidence.append(candidate)
+            payload = proposed
+
+        return payload
+
     return MultiAgentCoordinator(
         PlannerAgent(providers.planner).plan,
         ExecutorAgent(providers.executor).execute,
         ReviewerAgent(providers.reviewer).review,
+        role_executors={
+            AgentRole.RESEARCHER: ResearcherAgent(providers.researcher).research,
+            AgentRole.ANALYST: AnalystAgent(providers.analyst).analyze,
+            AgentRole.WRITER: WriterAgent(providers.writer).write,
+            AgentRole.MEMORY: retrieve_memory,
+        },
     )
+
+
+
+def _is_transient_database_connection_error(error: DBAPIError) -> bool:
+    if error.connection_invalidated:
+        return True
+
+    pending = [error.orig]
+    seen: set[int] = set()
+
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+
+        sqlstate = getattr(current, "sqlstate", None)
+        if not isinstance(sqlstate, str):
+            sqlstate = getattr(current, "pgcode", None)
+
+        if isinstance(sqlstate, str) and (
+            sqlstate.startswith("08")
+            or sqlstate in {"57P01", "57P02", "57P03"}
+        ):
+            return True
+
+        if type(current).__name__ in {
+            "ConnectionDoesNotExistError",
+            "CannotConnectNowError",
+            "ConnectionFailureError",
+        }:
+            return True
+
+        pending.extend(
+            getattr(current, attribute, None)
+            for attribute in ("orig", "__cause__", "__context__")
+        )
+
+    return False
 
 
 class MultiAgentWorker:
@@ -71,9 +173,7 @@ class MultiAgentWorker:
         session_factory: async_sessionmaker[AsyncSession],
         *,
         repository: MultiAgentTaskRepository = task_repository,
-        coordinator_factory: Callable[[], MultiAgentCoordinator] = (
-            build_coordinator
-        ),
+        coordinator_factory: Callable[[], MultiAgentCoordinator] | None = None,
         worker_id: str | None = None,
         redis_client: Any | None = None,
         poll_interval: float = POLL_INTERVAL_SECONDS,
@@ -101,6 +201,45 @@ class MultiAgentWorker:
         self._recovery_interval = recovery_interval
         self._next_recovery_at = 0.0
         self._stopping = asyncio.Event()
+        self._health_state = "starting"
+        self._last_poll_at: str | None = None
+        self._last_poll_error: str | None = None
+
+    async def _publish_process_heartbeat(self) -> None:
+        if self._redis_client is None:
+            return
+
+        payload = {
+            "worker": "multi-agent-worker",
+            "worker_id": self._worker_id,
+            "status": self._health_state,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "last_poll_at": self._last_poll_at,
+            "last_poll_error": self._last_poll_error,
+        }
+        await self._redis_client.set(
+            PROCESS_HEARTBEAT_KEY,
+            json.dumps(payload),
+            ex=PROCESS_HEARTBEAT_TTL_SECONDS,
+        )
+
+    async def _run_process_heartbeat(self) -> None:
+        while not self._stopping.is_set():
+            try:
+                await self._publish_process_heartbeat()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("multi_agent_process_heartbeat_failed")
+                return
+
+            try:
+                await asyncio.wait_for(
+                    self._stopping.wait(),
+                    timeout=PROCESS_HEARTBEAT_INTERVAL_SECONDS,
+                )
+            except TimeoutError:
+                pass
 
     def stop(self) -> None:
         """Request a graceful stop after the current task."""
@@ -109,14 +248,26 @@ class MultiAgentWorker:
     async def run_forever(self) -> None:
         """Poll until shutdown is requested; never spin on an empty queue."""
         logger.info("multi_agent_worker_started")
+        heartbeat_task = None
+        if self._redis_client is not None:
+            heartbeat_task = asyncio.create_task(
+                self._run_process_heartbeat(),
+                name="multi-agent-process-heartbeat",
+            )
 
         try:
             while not self._stopping.is_set():
                 try:
+                    self._health_state = "processing"
                     processed = await self.process_once()
+                    self._last_poll_at = datetime.now(timezone.utc).isoformat()
+                    self._last_poll_error = None
+                    self._health_state = "idle"
                 except asyncio.CancelledError:
                     raise
-                except Exception:
+                except Exception as exc:
+                    self._health_state = "degraded"
+                    self._last_poll_error = type(exc).__name__
                     logger.exception("multi_agent_worker_iteration_failed")
                     processed = False
 
@@ -129,6 +280,19 @@ class MultiAgentWorker:
                     except TimeoutError:
                         pass
         finally:
+            self._health_state = "stopping"
+            self._stopping.set()
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                try:
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+            if self._redis_client is not None:
+                try:
+                    await self._redis_client.delete(PROCESS_HEARTBEAT_KEY)
+                except Exception:
+                    logger.exception("multi_agent_process_heartbeat_cleanup_failed")
             logger.info("multi_agent_worker_stopped")
 
     async def process_once(self) -> bool:
@@ -259,6 +423,7 @@ class MultiAgentWorker:
                                 worker_id=self._worker_id,
                                 lease_token=lease_token,
                                 error_code="task_execution_failed",
+                                result=result,
                             )
             except asyncio.CancelledError:
                 raise
@@ -299,7 +464,13 @@ class MultiAgentWorker:
         lease_token: uuid.UUID,
     ) -> dict[str, Any]:
         request = TaskRequest.model_validate(request_data)
-        coordinator = self._coordinator_factory()
+        if self._coordinator_factory is None:
+            coordinator = build_coordinator(
+                session_factory=self._session_factory,
+                tenant_id=tenant_id,
+            )
+        else:
+            coordinator = self._coordinator_factory()
         progress_enabled = True
 
         async def on_progress(snapshot: dict[str, Any]) -> None:
@@ -382,18 +553,40 @@ class MultiAgentWorker:
         task_id: uuid.UUID,
         lease_token: uuid.UUID,
     ) -> None:
-        """Renew the lease in short, independent transactions."""
+        """Renew the lease, briefly retrying transient database connection failures."""
         while True:
             await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
 
-            async with self._session_factory() as db:
-                async with db.begin():
-                    renewed = await self._repository.renew_lease(
-                        db,
-                        task_id=task_id,
-                        worker_id=self._worker_id,
-                        lease_token=lease_token,
+            for attempt in range(len(HEARTBEAT_DB_RETRY_DELAYS_SECONDS) + 1):
+                try:
+                    async with self._session_factory() as db:
+                        async with db.begin():
+                            renewed = await self._repository.renew_lease(
+                                db,
+                                task_id=task_id,
+                                worker_id=self._worker_id,
+                                lease_token=lease_token,
+                            )
+                    break
+
+                except DBAPIError as exc:
+                    if (
+                        not _is_transient_database_connection_error(exc)
+                        or attempt >= len(HEARTBEAT_DB_RETRY_DELAYS_SECONDS)
+                    ):
+                        raise
+
+                    retry_delay = HEARTBEAT_DB_RETRY_DELAYS_SECONDS[attempt]
+                    logger.warning(
+                        "multi_agent_heartbeat_database_retry",
+                        extra={
+                            "task_id": str(task_id),
+                            "attempt": attempt + 1,
+                            "retry_delay_seconds": retry_delay,
+                        },
+                        exc_info=True,
                     )
+                    await asyncio.sleep(retry_delay)
 
             if not renewed:
                 logger.warning(
@@ -401,7 +594,6 @@ class MultiAgentWorker:
                     extra={"task_id": str(task_id)},
                 )
                 return
-
 
 async def main() -> None:
     """Run the worker with graceful SIGINT and SIGTERM handling."""

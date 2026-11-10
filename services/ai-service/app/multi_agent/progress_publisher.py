@@ -8,7 +8,7 @@ PROGRESS_CHANNEL = "relay:multi-agent:progress:v1"
 MAX_PROGRESS_STEPS = 12
 
 _ALLOWED_PHASES = {"planning", "executing", "reviewing", "completed", "failed"}
-_ALLOWED_ROLES = {"planner", "executor", "memory", "reviewer", "coordinator"}
+_ALLOWED_ROLES = {"planner", "researcher", "executor", "memory", "writer", "analyst", "reviewer", "coordinator"}
 _ALLOWED_STATUSES = {"pending", "running", "completed", "failed", "skipped"}
 _STEP_KEYS = {"step_id", "role", "status"}
 
