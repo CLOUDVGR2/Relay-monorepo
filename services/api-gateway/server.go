@@ -167,6 +167,10 @@ type gatewayRuntime struct {
 func newGatewayRuntime(logger *slog.Logger, cfg config) *gatewayRuntime {
 	mux := http.NewServeMux()
 
+	// Gateway-owned API documentation; NestJS documentation remains at /docs.
+	mux.HandleFunc("GET /gateway/openapi.json", gatewayOpenAPISpecHandler)
+	mux.HandleFunc("GET /gateway/docs", gatewaySwaggerUIHandler)
+
 	// Liveness only checks the gateway process; it does not depend on backends.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -191,6 +195,8 @@ func newGatewayRuntime(logger *slog.Logger, cfg config) *gatewayRuntime {
 	mux.Handle("/jobs", nestProxy)
 	mux.Handle("/jobs/", nestProxy)
 	mux.Handle("/graphql", nestProxy)
+	mux.Handle("/calls", nestProxy)
+	mux.Handle("/calls/", nestProxy)
 	mux.Handle("/docs", nestProxy)
 	mux.Handle("/docs/", nestProxy)
 	mux.Handle("/health", nestProxy)

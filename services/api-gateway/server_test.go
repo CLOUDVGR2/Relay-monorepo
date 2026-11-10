@@ -190,6 +190,49 @@ func TestGatewaySecurityHeadersOnWire(t *testing.T) {
 	}
 }
 
+func TestCallsProxyForwardsRecordingUploadAndAuthorization(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %q, want POST", r.Method)
+		}
+		if got, want := r.URL.RequestURI(), "/calls/recording-uploads/upload-123/complete?source=mobile"; got != want {
+			t.Errorf("upstream URI = %q, want %q", got, want)
+		}
+		if got, want := r.Header.Get("Authorization"), "Bearer mobile-test-token"; got != want {
+			t.Errorf("Authorization = %q, want %q", got, want)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("nest-ok"))
+	}))
+	defer upstream.Close()
+
+	cfg := config{
+		Port: "8090", ExpressURL: "http://127.0.0.1:5001",
+		NestURL:     upstream.URL,
+		GoAPIURL:    "http://127.0.0.1:8081",
+		PythonAIURL: "http://127.0.0.1:8000",
+	}
+	handler := newHandler(slog.New(slog.NewTextHandler(io.Discard, nil)), cfg)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/calls/recording-uploads/upload-123/complete?source=mobile",
+		strings.NewReader("{}"),
+	)
+	req.Header.Set("Authorization", "Bearer mobile-test-token")
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); got != "nest-ok" {
+		t.Fatalf("body = %q, want %q", got, "nest-ok")
+	}
+}
+
 func TestUnavailableUpstreamReturnsJSON502(t *testing.T) {
 	cfg := config{
 		Port: "8090", ExpressURL: "http://127.0.0.1:1",
@@ -209,5 +252,60 @@ func TestUnavailableUpstreamReturnsJSON502(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"error":"upstream_unavailable"`) {
 		t.Fatalf("unexpected error body: %q", rec.Body.String())
+	}
+}
+
+func TestGatewayOpenAPISpecEndpoint(t *testing.T) {
+	rec := httptest.NewRecorder()
+	testHandler().ServeHTTP(
+		rec,
+		httptest.NewRequest(http.MethodGet, "/gateway/openapi.json", nil),
+	)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+
+	body := rec.Body.String()
+	for _, expected := range []string{
+		`"openapi": "3.1.0"`,
+		`"title": "Relay API Gateway"`,
+		`"/healthz"`,
+		`"/readyz"`,
+		`"HealthStatus"`,
+		`"X-Request-ID"`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("OpenAPI document does not contain %q", expected)
+		}
+	}
+}
+
+func TestGatewaySwaggerUIEndpoint(t *testing.T) {
+	rec := httptest.NewRecorder()
+	testHandler().ServeHTTP(
+		rec,
+		httptest.NewRequest(http.MethodGet, "/gateway/docs", nil),
+	)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/html") {
+		t.Fatalf("Content-Type = %q, want text/html", got)
+	}
+
+	body := rec.Body.String()
+	for _, expected := range []string{
+		"Relay API Gateway",
+		"swagger-ui",
+		"/gateway/openapi.json",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("Swagger UI page does not contain %q", expected)
+		}
 	}
 }
