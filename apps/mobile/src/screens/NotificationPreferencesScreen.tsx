@@ -156,6 +156,7 @@ export function NotificationPreferencesScreen(_props: Props) {
               <Text style={styles.muted}>Turn off to stop push alerts while keeping activity in your inbox.</Text>
             </View>
             <Switch
+              accessibilityLabel="Allow push notifications"
               value={preferences.pushEnabled}
               onValueChange={(pushEnabled) => {
                 setSaved(false);
@@ -178,6 +179,7 @@ export function NotificationPreferencesScreen(_props: Props) {
                   <Text style={styles.muted}>{muted ? 'Muted' : 'Notifications on'}</Text>
                 </View>
                 <Switch
+                  accessibilityLabel={`${muted ? 'Unmute' : 'Mute'} notifications for ${person.fullName}`}
                   value={muted}
                   onValueChange={(value) => toggleMuted(String(person._id), value)}
                   trackColor={{ true: colors.primary }}
@@ -196,6 +198,7 @@ export function NotificationPreferencesScreen(_props: Props) {
               <Text style={styles.muted}>Push alerts are suppressed during this interval.</Text>
             </View>
             <Switch
+              accessibilityLabel="Enable quiet hours"
               value={preferences.quietHours.enabled}
               onValueChange={(enabled) => {
                 setSaved(false);
@@ -268,11 +271,13 @@ export function NotificationPreferencesScreen(_props: Props) {
 
         <Pressable
           accessibilityRole="button"
+          accessibilityLabel="Save notification preferences"
+          accessibilityState={{ disabled: saving }}
           disabled={saving}
           onPress={() => void save()}
           style={({ pressed }) => [styles.saveButton, pressed && styles.pressed, saving && styles.disabledButton]}
         >
-          <Text style={styles.saveText}>{saving ? 'Saving…' : 'Save preferences'}</Text>
+          <Text accessibilityLiveRegion="polite" style={styles.saveText}>{saving ? 'Saving…' : 'Save preferences'}</Text>
         </Pressable>
       </ScrollView>
     </Screen>
@@ -289,7 +294,7 @@ const styles = StyleSheet.create({
   muted: { color: colors.muted, fontSize: 12, lineHeight: 18 },
   fieldLabel: { color: colors.text, fontSize: 12, fontWeight: '700', marginTop: 4 },
   input: { color: colors.text, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 },
-  saveButton: { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  saveButton: { minHeight: 44, justifyContent: 'center', backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   saveText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
   pressed: { opacity: 0.75 },
   disabledButton: { opacity: 0.5 },

@@ -1,5 +1,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 import {
   mediaDevices,
   MediaStream,
@@ -8,6 +9,25 @@ import {
   RTCSessionDescription,
 } from 'react-native-webrtc';
 import type { Socket } from 'socket.io-client';
+import {
+  completeRecordingUpload,
+  createRecordingUpload,
+  refreshRecordingUpload,
+  uploadRecordingFile,
+} from '../lib/call-recording-api';
+import type { RecordingUploadIntent } from '../lib/call-recording-api';
+import {
+  startCallAudioRecording,
+  stopCallAudioRecording,
+} from '../lib/call-audio-recorder';
+import type { NativeRecordingResult } from '../lib/call-audio-recorder';
+import {
+  deleteRecordingRecovery,
+  markRecordingUploaded,
+  readRecordingRecovery,
+  saveRecordedAudio,
+  saveRecordingIntent,
+} from '../lib/call-recording-recovery';
 
 export type MediaCall = {
   id: string;
@@ -45,7 +65,11 @@ export function useCallMedia(
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [status, setStatus] = useState<MediaStatus>('idle');
   const [muted, setMuted] = useState(false);
-  const [recordingAuthorized, setRecordingAuthorized] = useState(false);
+  const [recordingAuthorizedCallId, setRecordingAuthorizedCallId] =
+    useState<string | null>(null);
+  const [recordingState, setRecordingState] = useState<
+    'idle' | 'starting' | 'recording' | 'uploading' | 'ready' | 'failed'
+  >('idle');
 
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const localRef = useRef<MediaStream | null>(null);
@@ -53,12 +77,75 @@ export function useCallMedia(
   const pendingIceRef = useRef<NonNullable<SignalPayload['candidate']>[]>([]);
   const offerStartedRef = useRef(false);
   const mountedRef = useRef(true);
+  const recordingStartedRef = useRef(false);
+  const recordingStartPromiseRef = useRef<Promise<boolean> | null>(null);
+  const pendingRecordingRef = useRef<NativeRecordingResult | null>(null);
+  const pendingUploadIntentRef = useRef<RecordingUploadIntent | null>(null);
+  const recordingUploadedRef = useRef(false);
+  const recordingPersistedRef = useRef(false);
+  const finalizePromiseRef = useRef<Promise<void> | null>(null);
 
   const callId = call?.id;
   const initiatorId = call?.initiatorId;
   const active = call?.status === 'ACTIVE';
 
+  const recordingAuthorized =
+    Boolean(active && callId) && recordingAuthorizedCallId === callId;
+
+  // Stop native capture once and persist the WAV before teardown.
+  // Upload and server confirmation remain the responsibility of finishRecording.
+  const finalizeLocalRecording = useCallback((): Promise<void> => {
+    if (finalizePromiseRef.current) {
+      return finalizePromiseRef.current;
+    }
+
+    const finalizePromise = (async () => {
+      const startPromise = recordingStartPromiseRef.current;
+
+      if (startPromise) {
+        try {
+          await startPromise;
+        } catch {
+          if (!recordingStartedRef.current) return;
+        }
+      }
+
+      if (!pendingRecordingRef.current) {
+        if (!recordingStartedRef.current) return;
+
+        const recording = await stopCallAudioRecording();
+        console.info('[Relay recording] Native stop result', {
+          keys: Object.keys(recording ?? {}),
+          sampleCount: recording?.sampleCount,
+          byteSize: recording?.byteSize,
+          sha256Type: typeof recording?.sha256,
+        });
+        recordingStartedRef.current = false;
+        pendingRecordingRef.current = recording;
+      }
+
+      const recording = pendingRecordingRef.current;
+      if (!recording || !callId) return;
+
+      if (!recordingPersistedRef.current) {
+        await saveRecordedAudio(userId, callId, recording);
+        recordingPersistedRef.current = true;
+      }
+    })();
+
+    finalizePromiseRef.current = finalizePromise;
+
+    return finalizePromise.finally(() => {
+      if (finalizePromiseRef.current === finalizePromise) {
+        finalizePromiseRef.current = null;
+      }
+    });
+  }, [callId, userId]);
+
   const cleanup = useCallback(() => {
+    void finalizeLocalRecording().catch((error) => {
+      console.warn('[Relay recording] Could not preserve recording during cleanup:', error);
+    });
     if (callId) {
       socket?.emit('call:leave', { callId });
     }
@@ -81,9 +168,9 @@ export function useCallMedia(
       setRemoteStream(null);
       setStatus('idle');
       setMuted(false);
-      setRecordingAuthorized(false);
+      setRecordingAuthorizedCallId(null);
     }
-  }, [callId, socket]);
+  }, [callId, finalizeLocalRecording, socket]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -94,12 +181,8 @@ export function useCallMedia(
 
   useEffect(() => {
     if (!active || !callId || !initiatorId || !socket) {
-      setRecordingAuthorized(false);
       return;
     }
-
-    // Recording permission is always re-established by the server per call.
-    setRecordingAuthorized(false);
 
     let disposed = false;
     let joined = false;
@@ -287,7 +370,9 @@ export function useCallMedia(
           type: typeof payload.recordingAuthorized,
         },
       );
-      setRecordingAuthorized(payload.recordingAuthorized === true);
+      setRecordingAuthorizedCallId(
+          payload.recordingAuthorized === true ? callId : null,
+        );
       console.info('[Relay media] Joined call', {
         callId,
         peerConnected,
@@ -312,7 +397,9 @@ export function useCallMedia(
         'Received recording authorization update',
         payload,
       );
-      setRecordingAuthorized(payload.recordingAuthorized === true);
+      setRecordingAuthorizedCallId(
+          payload.recordingAuthorized === true ? callId : null,
+        );
     };
 
     const onPeerJoined = (payload: { callId: string }) => {
@@ -428,7 +515,6 @@ export function useCallMedia(
 
       joined = false;
       peerConnected = false;
-      setRecordingAuthorized(false);
       resetPeerConnection();
     };
 
@@ -494,6 +580,10 @@ export function useCallMedia(
     return () => {
       disposed = true;
 
+      void finalizeLocalRecording().catch((error) => {
+        console.warn('[Relay recording] Could not preserve recording during signaling teardown:', error);
+      });
+
       socket.off('call:joined', onJoined);
       socket.off('call:recording-authorization', onRecordingAuthorization);
       socket.off('call:peer-joined', onPeerJoined);
@@ -525,7 +615,167 @@ export function useCallMedia(
       pendingIceRef.current = [];
       offerStartedRef.current = false;
     };
-  }, [active, callId, initiatorId, socket, userId]);
+  }, [active, callId, finalizeLocalRecording, initiatorId, socket, userId]);
+
+  useEffect(() => {
+    if (
+      Platform.OS !== 'android' ||
+      !active ||
+      !callId ||
+      status !== 'connected' ||
+      !recordingAuthorized ||
+      recordingStartedRef.current ||
+      recordingStartPromiseRef.current ||
+      pendingRecordingRef.current ||
+      pendingUploadIntentRef.current
+    ) {
+      return;
+    }
+
+    setRecordingState('starting');
+
+    const startPromise = Promise.resolve().then(async () => {
+      // Preserve any existing recovery instead of replacing its upload ID.
+      const recovery = await readRecordingRecovery(userId, callId);
+
+      if (recovery) {
+        console.info('[Relay recording] Recovery result', {
+          status: recovery.status,
+          keys: Object.keys(recovery.recording ?? {}),
+          sampleCount: recovery.recording?.sampleCount,
+          byteSize: recovery.recording?.byteSize,
+          sha256Type: typeof recovery.recording?.sha256,
+        });
+        pendingUploadIntentRef.current = {
+          uploadId: recovery.uploadId,
+          uploadUrl: '',
+          expiresIn: 0,
+          contentType: 'audio/wav',
+        };
+        recordingPersistedRef.current = true;
+
+        if (recovery.status === 'CAPTURE_PENDING' || !recovery.recording) {
+          if (mountedRef.current) setRecordingState('failed');
+          return false;
+        }
+
+        pendingRecordingRef.current = recovery.recording;
+        recordingUploadedRef.current = recovery.status === 'UPLOADED';
+
+        if (mountedRef.current) setRecordingState('failed');
+        return false;
+      }
+
+      const intent = await createRecordingUpload(callId);
+      await saveRecordingIntent(userId, callId, intent.uploadId);
+
+      pendingUploadIntentRef.current = intent;
+      recordingPersistedRef.current = false;
+
+      await startCallAudioRecording();
+      recordingStartedRef.current = true;
+      return true;
+    });
+
+    recordingStartPromiseRef.current = startPromise;
+
+    void startPromise
+      .then((started) => {
+        if (started && mountedRef.current) {
+          setRecordingState('recording');
+        }
+      })
+      .catch((error) => {
+        console.warn('[Relay recording] Could not start capture:', error);
+        if (mountedRef.current) setRecordingState('failed');
+      })
+      .finally(() => {
+        if (recordingStartPromiseRef.current === startPromise) {
+          recordingStartPromiseRef.current = null;
+        }
+      });
+  }, [active, callId, recordingAuthorized, status, userId]);
+
+  const finishPromiseRef = useRef<Promise<void> | null>(null);
+
+  const finishRecording = useCallback((): Promise<void> => {
+    if (finishPromiseRef.current) {
+      return finishPromiseRef.current;
+    }
+
+    const finishPromise = (async () => {
+      if (!callId) return;
+
+      await finalizeLocalRecording();
+
+      const recording = pendingRecordingRef.current;
+      if (!recording) return;
+
+      if (mountedRef.current) setRecordingState('uploading');
+
+      try {
+        let intent = pendingUploadIntentRef.current;
+
+        // This fallback is useful for recordings started before an intent
+        // was available. It will only work while the call is still active.
+        if (!intent) {
+          intent = await createRecordingUpload(callId);
+          pendingUploadIntentRef.current = intent;
+        }
+
+        if (!recordingUploadedRef.current) {
+          // Always obtain a fresh URL, retaining the original upload ID
+          // and object key. This also works after a remote call end.
+          intent = await refreshRecordingUpload(intent.uploadId);
+          pendingUploadIntentRef.current = intent;
+
+          await uploadRecordingFile(intent.uploadUrl, recording.path);
+          await markRecordingUploaded(userId, callId);
+          recordingUploadedRef.current = true;
+        }
+
+        console.info('[Relay recording] Completion metadata check', {
+          sampleCount: recording.sampleCount,
+          sampleCountType: typeof recording.sampleCount,
+          byteSize: recording.byteSize,
+          byteSizeType: typeof recording.byteSize,
+          sha256Length: recording.sha256?.length,
+          sha256Type: typeof recording.sha256,
+        });
+
+        await completeRecordingUpload(intent.uploadId, {
+          contentType: 'audio/wav',
+          sampleRate: recording.sampleRate,
+          channels: recording.channels,
+          sampleCount: recording.sampleCount,
+          durationMs: recording.durationMs,
+          byteSize: recording.byteSize,
+          sha256: recording.sha256,
+        });
+
+        await deleteRecordingRecovery(userId, callId);
+
+        pendingRecordingRef.current = null;
+        pendingUploadIntentRef.current = null;
+        recordingUploadedRef.current = false;
+        recordingPersistedRef.current = false;
+
+        if (mountedRef.current) setRecordingState('ready');
+      } catch (error) {
+        // Keep the WAV, upload intent, and PUT state for a safe retry.
+        if (mountedRef.current) setRecordingState('failed');
+        throw error;
+      }
+    })();
+
+    finishPromiseRef.current = finishPromise;
+
+    return finishPromise.finally(() => {
+      if (finishPromiseRef.current === finishPromise) {
+        finishPromiseRef.current = null;
+      }
+    });
+  }, [callId, finalizeLocalRecording, userId]);
 
   const toggleMute = useCallback(() => {
     const nextMuted = !muted;
@@ -543,6 +793,8 @@ export function useCallMedia(
     status,
     muted,
     recordingAuthorized,
+    recordingState,
+    finishRecording,
     toggleMute,
     cleanup,
   };

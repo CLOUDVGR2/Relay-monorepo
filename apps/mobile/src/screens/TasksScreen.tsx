@@ -102,7 +102,8 @@ export function TasksScreen({ navigation }: Props) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [conversationsLoading, setConversationsLoading] = useState(true);
+  const [tasksLoading, setTasksLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -117,7 +118,7 @@ export function TasksScreen({ navigation }: Props) {
     let active = true;
 
     async function loadConversations() {
-      setLoading(true);
+      setConversationsLoading(true);
       setError('');
 
       try {
@@ -144,7 +145,7 @@ export function TasksScreen({ navigation }: Props) {
           );
         }
       } finally {
-        if (active) setLoading(false);
+        if (active) setConversationsLoading(false);
       }
     }
 
@@ -161,10 +162,11 @@ export function TasksScreen({ navigation }: Props) {
     async function refresh() {
       if (!conversationId) {
         setTasks([]);
+        setTasksLoading(false);
         return;
       }
 
-      setLoading(true);
+      setTasksLoading(true);
       setError('');
 
       try {
@@ -179,7 +181,7 @@ export function TasksScreen({ navigation }: Props) {
           );
         }
       } finally {
-        if (active) setLoading(false);
+        if (active) setTasksLoading(false);
       }
     }
 
@@ -282,7 +284,7 @@ export function TasksScreen({ navigation }: Props) {
         </View>
       ) : (
         <Text style={styles.muted}>
-          {loading
+          {conversationsLoading
             ? 'Loading conversations…'
             : 'No accessible conversations were found for tasks.'}
         </Text>
@@ -322,7 +324,7 @@ export function TasksScreen({ navigation }: Props) {
 
       <ErrorText>{error}</ErrorText>
 
-      {loading ? (
+      {tasksLoading ? (
         <ActivityIndicator color={colors.primary} style={styles.loader} />
       ) : !conversationId ? (
         <Text style={styles.muted}>
@@ -359,6 +361,7 @@ export function TasksScreen({ navigation }: Props) {
               {NEXT_STATUS[task.status] ? (
                 <Pressable
                   accessibilityRole="button"
+                  accessibilityLabel={`${task.status === 'DONE' ? 'Reopen' : 'Advance status for'} task: ${task.title}`}
                   onPress={() => void changeStatus(task)}
                   style={styles.statusButton}
                 >
@@ -398,6 +401,8 @@ const styles = StyleSheet.create({
   },
   conversationChip: {
     maxWidth: '100%',
+    minHeight: 44,
+    justifyContent: 'center',
     borderRadius: 20,
     borderWidth: 1,
     borderColor: colors.border,
@@ -478,6 +483,8 @@ const styles = StyleSheet.create({
   },
   doneStatus: { color: colors.success },
   statusButton: {
+    minHeight: 44,
+    justifyContent: 'center',
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 10,

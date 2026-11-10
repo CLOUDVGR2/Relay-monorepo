@@ -1,9 +1,30 @@
 import type { ComponentProps, PropsWithChildren } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import Svg, { G, Path, Rect } from 'react-native-svg';
 import { colors } from '../theme/colors';
 
 export function Brand() {
-  return <View style={styles.brand}><View style={styles.brandMark}><Text style={styles.brandMarkText}>R</Text></View><View><Text style={styles.brandName}>Relay</Text><Text style={styles.brandCaption}>Conversations that move work forward</Text></View></View>;
+  return (
+    <View style={styles.brand}>
+      <Svg width={48} height={48} viewBox="0 0 48 48">
+        <Rect width={48} height={48} rx={14} fill="#0f172a" />
+        <G
+          transform="translate(6 6) scale(1.5)"
+          fill="none"
+          stroke="#93c5fd"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <Path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3" />
+        </G>
+      </Svg>
+      <View>
+        <Text style={styles.brandName}>Relay</Text>
+        <Text style={styles.brandCaption}>Conversations that move work forward</Text>
+      </View>
+    </View>
+  );
 }
 
 export function Heading({ title, subtitle }: { title: string; subtitle?: string }) {
@@ -31,8 +52,6 @@ export function Avatar({ name, size = 46 }: { name?: string; size?: number }) {
 
 const styles = StyleSheet.create({
   brand: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 44 },
-  brandMark: { width: 48, height: 48, borderRadius: 15, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  brandMarkText: { color: colors.background, fontWeight: '900', fontSize: 27 },
   brandName: { color: colors.text, fontWeight: '800', fontSize: 23, letterSpacing: 0.2 },
   brandCaption: { color: colors.muted, fontSize: 11, marginTop: 2 },
   heading: { marginBottom: 24, gap: 7 },

@@ -193,7 +193,7 @@ export function ActivityInboxScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  action: { padding: 8 },
+  action: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 8, paddingVertical: 10 },
   actionText: { color: colors.primary, fontSize: 12, fontWeight: '700' },
   disabled: { opacity: 0.4 },
   list: { paddingTop: 12, paddingBottom: 30 },

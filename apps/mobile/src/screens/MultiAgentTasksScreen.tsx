@@ -18,7 +18,7 @@ import { colors } from '../theme/colors';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MultiAgentTasks'>;
 
-type AgentRole = 'planner' | 'executor' | 'memory' | 'reviewer' | 'coordinator';
+type AgentRole = 'planner' | 'researcher' | 'executor' | 'memory' | 'writer' | 'analyst' | 'reviewer' | 'coordinator';
 type StepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 type Phase = 'planning' | 'executing' | 'reviewing' | 'completed' | 'failed';
 
@@ -37,7 +37,12 @@ type MultiAgentTask = {
   id: string;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   progress: Progress;
-  result: Record<string, unknown> | null;
+  result: {
+    title?: string;
+    final_output?: string;
+    error_message?: string;
+    [key: string]: unknown;
+  } | null;
   error_code: string | null;
   attempt_count: number;
   created_at: string;
@@ -61,8 +66,11 @@ const PHASES = new Set<Phase>([
 
 const ROLES = new Set<AgentRole>([
   'planner',
+  'researcher',
   'executor',
   'memory',
+  'writer',
+  'analyst',
   'reviewer',
   'coordinator',
 ]);
@@ -238,7 +246,22 @@ export function MultiAgentTasksScreen({ navigation }: Props) {
 
           return loadedTasks.map((task) => {
             const latest = latestById.get(task.id);
-            return latest ?? task;
+
+            if (!latest) return task;
+
+            // Prefer the API's terminal task because it contains the persisted result.
+            if (TERMINAL_STATUSES.has(task.status)) return task;
+
+            // Preserve terminal socket progress until the API confirms persistence.
+            if (TERMINAL_STATUSES.has(latest.status)) {
+              return {
+                ...task,
+                status: latest.status,
+                progress: latest.progress,
+              };
+            }
+
+            return latest;
           });
         }
 
@@ -300,6 +323,16 @@ export function MultiAgentTasksScreen({ navigation }: Props) {
           };
         }),
       );
+
+      const nextStatus = phaseToTaskStatus(payload.progress.phase);
+
+      if (TERMINAL_STATUSES.has(nextStatus)) {
+        setTimeout(() => {
+          if (activeRef.current) {
+            void loadTasks();
+          }
+        }, 1000);
+      }
     };
 
     socket.on('connect', onConnect);
@@ -324,7 +357,7 @@ export function MultiAgentTasksScreen({ navigation }: Props) {
       const response = await api.post<unknown>('/ai/multi-agent/tasks', {
         prompt: cleanPrompt,
         max_steps: maxSteps,
-        timeout_seconds: 30,
+        timeout_seconds: 240,
       });
 
       if (!isTask(response.data)) {
@@ -495,9 +528,23 @@ export function MultiAgentTasksScreen({ navigation }: Props) {
               </View>
             )}
 
+            {task.status === 'completed' &&
+            typeof task.result?.final_output === 'string' &&
+            task.result.final_output.trim().length > 0 ? (
+              <View style={styles.reportCard}>
+                <Text style={styles.label}>FINAL REPORT</Text>
+                <Text selectable style={styles.reportText}>
+                  {task.result.final_output}
+                </Text>
+              </View>
+            ) : null}
+
             {task.status === 'failed' ? (
               <Text style={styles.failedNote}>
-                This task failed. You can submit a new task to try again.
+                {typeof task.result?.error_message === 'string' &&
+                task.result.error_message.trim().length > 0
+                  ? task.result.error_message
+                  : 'This task failed. You can submit a new task to try again.'}
               </Text>
             ) : null}
 
@@ -584,8 +631,8 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   stepButton: {
-    width: 38,
-    height: 38,
+    width: 44,
+    height: 44,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: colors.border,
@@ -640,8 +687,8 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   pageArrow: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
@@ -702,6 +749,13 @@ const styles = StyleSheet.create({
   stepId: { color: colors.muted, fontSize: 11 },
   stepStatus: { color: colors.muted, fontSize: 11, fontWeight: '700' },
   muted: { color: colors.muted, fontSize: 13, lineHeight: 19 },
+  reportCard: {
+    backgroundColor: colors.surfaceRaised,
+    borderRadius: 10,
+    padding: 12,
+    gap: 8,
+  },
+  reportText: { color: colors.text, fontSize: 13, lineHeight: 20 },
   failedNote: { color: colors.primary, fontSize: 12, lineHeight: 18 },
   footer: { color: colors.muted, fontSize: 11, lineHeight: 16 },
   loader: { marginVertical: 24 },

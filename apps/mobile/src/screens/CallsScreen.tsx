@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Modal,
@@ -10,7 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { api } from "../lib/api";
+import { api, getErrorMessage } from "../lib/api";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Avatar, Button, ErrorText } from "../components/Ui";
 import { Screen } from "../components/Screen";
@@ -21,6 +21,19 @@ import { colors } from "../theme/colors";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 import { useCallMedia } from "../hooks/useCallMedia";
+import {
+  completeRecordingUpload,
+  refreshRecordingUpload,
+  uploadRecordingFile,
+} from "../lib/call-recording-api";
+import {
+  deleteRecordingRecovery,
+  listRecordingRecoveries,
+  markRecordingUploaded,
+} from "../lib/call-recording-recovery";
+import type {
+  RecordingRecoveryRecord,
+} from "../lib/call-recording-recovery";
 
 const HISTORY_PAGE_SIZE = 10;
 
@@ -299,6 +312,8 @@ export function CallsScreen({ user, route, navigation }: Props) {
   const [notice, setNotice] = useState("");
   const [infoVisible, setInfoVisible] = useState(false);
   const [mediaCallId, setMediaCallId] = useState<string | null>(null);
+  const [recordingRecoveries, setRecordingRecoveries] = useState<RecordingRecoveryRecord[]>([]);
+  const remoteEndedCallIdsRef = useRef<Set<string>>(new Set());
   const [historyVisible, setHistoryVisible] = useState(true);
   const [historyPage, setHistoryPage] = useState(1);
 
@@ -350,6 +365,8 @@ export function CallsScreen({ user, route, navigation }: Props) {
     status: mediaStatus,
     muted,
     recordingAuthorized,
+    finishRecording,
+    recordingState,
     toggleMute,
   } = useCallMedia(
     mediaCall
@@ -394,6 +411,114 @@ export function CallsScreen({ user, route, navigation }: Props) {
       setRefreshing(false);
     }
   }, []);
+
+  const loadRecordingRecoveries = useCallback(async () => {
+    try {
+      const records = await listRecordingRecoveries(user._id);
+      setRecordingRecoveries(records);
+    } catch (err) {
+      console.warn(
+        "[Relay recording] Could not load recovery records:",
+        err,
+      );
+    }
+  }, [user._id]);
+
+  useEffect(() => {
+    // Initial recovery hydration; the async loader updates state after the database read.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadRecordingRecoveries();
+  }, [loadRecordingRecoveries]);
+
+  const retryRecordingRecovery = useCallback(
+    async (recovery: RecordingRecoveryRecord) => {
+      const recording = recovery.recording;
+
+      if (!recording || recovery.status === "CAPTURE_PENDING") {
+        return;
+      }
+
+      setWorking(`recording-recovery:${recovery.callId}`);
+      setError("");
+      setNotice("");
+
+      try {
+        if (recovery.status === "RECORDED") {
+          const intent = await refreshRecordingUpload(recovery.uploadId);
+          await uploadRecordingFile(intent.uploadUrl, recording.path);
+          await markRecordingUploaded(user._id, recovery.callId);
+        }
+
+        await completeRecordingUpload(recovery.uploadId, {
+          contentType: "audio/wav",
+          sampleRate: recording.sampleRate,
+          channels: recording.channels,
+          sampleCount: recording.sampleCount,
+          durationMs: recording.durationMs,
+          byteSize: recording.byteSize,
+          sha256: recording.sha256,
+        });
+
+        await deleteRecordingRecovery(user._id, recovery.callId);
+        await loadRecordingRecoveries();
+        await loadData(true);
+        setNotice("Your saved call recording was uploaded successfully.");
+      } catch (err) {
+        setError(
+          getErrorMessage(
+            err,
+            err instanceof Error
+              ? err.message
+              : "Could not recover the saved call recording.",
+          ),
+        );
+        await loadRecordingRecoveries();
+      } finally {
+        setWorking("");
+      }
+    },
+    [loadData, loadRecordingRecoveries, user._id],
+  );
+
+  const discardIncompleteRecording = useCallback(
+    (recovery: RecordingRecoveryRecord) => {
+      if (recovery.status !== "CAPTURE_PENDING") return;
+
+      Alert.alert(
+        "Discard incomplete recording?",
+        "The audio was not finalized and cannot be recovered. This only removes its local recovery entry.",
+        [
+          { text: "Keep", style: "cancel" },
+          {
+            text: "Discard",
+            style: "destructive",
+            onPress: () => {
+              void (async () => {
+                setWorking(`recording-discard:${recovery.callId}`);
+                setError("");
+                setNotice("");
+
+                try {
+                  await deleteRecordingRecovery(user._id, recovery.callId);
+                  await loadRecordingRecoveries();
+                  setNotice("Incomplete recording recovery entry discarded.");
+                } catch (err) {
+                  setError(
+                    err instanceof Error
+                      ? err.message
+                      : "Could not discard the incomplete recording.",
+                  );
+                } finally {
+                  setWorking("");
+                }
+              })();
+            },
+          },
+        ],
+      );
+    },
+    [loadRecordingRecoveries, user._id],
+  );
 
   const loadContacts = useCallback(async () => {
     try {
@@ -572,12 +697,41 @@ export function CallsScreen({ user, route, navigation }: Props) {
       )
         return;
 
+      if (event.status === "ENDED" && event.callId === mediaCall?.id) {
+        remoteEndedCallIdsRef.current.add(event.callId);
+      }
+
       if (event.eventType === "invitation") {
         setNotice(`Incoming ${event.type.toLowerCase()} call invitation.`);
+      } else if (event.status === "ENDED") {
+        setNotice("The other participant ended the call.");
       } else {
         setNotice("A call session was updated.");
       }
-      void loadData(true);
+
+      void (async () => {
+        let recordingError = "";
+
+        if (event.status === "ENDED" && event.callId === mediaCall?.id) {
+          try {
+            await finishRecording();
+          } catch (err) {
+            recordingError = getErrorMessage(
+              err,
+              err instanceof Error ? err.message : "Recording upload failed.",
+            );
+            await loadRecordingRecoveries();
+          }
+        }
+
+        await loadData(true);
+
+        if (recordingError) {
+          setError(
+            `The call ended, but its recording could not be uploaded: ${recordingError}`,
+          );
+        }
+      })();
     };
 
     socket?.on("callEvent", onCallEvent);
@@ -586,7 +740,13 @@ export function CallsScreen({ user, route, navigation }: Props) {
       active = false;
       socket?.off("callEvent", onCallEvent);
     };
-  }, [loadData, user._id]);
+  }, [
+    finishRecording,
+    loadData,
+    loadRecordingRecoveries,
+    mediaCall?.id,
+    user._id,
+  ]);
 
   const performAction = async (
     action: "accept" | "decline" | "end",
@@ -598,7 +758,36 @@ export function CallsScreen({ user, route, navigation }: Props) {
     setError("");
     setNotice("");
 
+    let recordingError = "";
+
     try {
+      if (action === "end" && mediaCall?.id === call.id) {
+        try {
+          await finishRecording();
+        } catch (err) {
+          recordingError = getErrorMessage(
+            err,
+            err instanceof Error ? err.message : "Recording upload failed.",
+          );
+          await loadRecordingRecoveries();
+        }
+      }
+
+      if (action === "end" && remoteEndedCallIdsRef.current.has(call.id)) {
+        remoteEndedCallIdsRef.current.delete(call.id);
+        setMediaCallId((current) => (current === call.id ? null : current));
+        await loadData(true);
+
+        if (recordingError) {
+          setError(
+            `The call had already ended, but its recording could not be uploaded: ${recordingError}`,
+          );
+        } else {
+          setNotice("The call had already ended.");
+        }
+        return;
+      }
+
       await graphql<Record<string, { id: string; status: CallStatus }>>(
         CALL_ACTIONS[action],
         {
@@ -621,9 +810,21 @@ export function CallsScreen({ user, route, navigation }: Props) {
         setMediaCallId(call.id);
       }
       await loadData(true);
+
+      if (recordingError) {
+        setError(
+          `The call ended, but its recording could not be uploaded: ${recordingError}`,
+        );
+      }
     } catch (err) {
-      setError(
+      const actionError = getErrorMessage(
+        err,
         err instanceof Error ? err.message : "Could not update the call.",
+      );
+      setError(
+        recordingError
+          ? `Could not update the call: ${actionError}. Recording upload also failed: ${recordingError}`
+          : actionError,
       );
     } finally {
       setWorking("");
@@ -853,11 +1054,21 @@ export function CallsScreen({ user, route, navigation }: Props) {
                 accessibilityLiveRegion="polite"
                 style={styles.mediaDisclaimer}
               >
-                {recordingAuthorized
-                  ? "Both participants have consented. Recording is authorized but not active."
-                  : mediaStatus === "connected"
-                    ? "Recording is unavailable until both participants consent."
-                    : "Recording authorization has not been confirmed."}
+                {recordingState === "recording"
+                  ? "Recording your microphone audio."
+                  : recordingState === "starting"
+                    ? "Starting secure audio recording…"
+                    : recordingState === "uploading"
+                      ? "Uploading and confirming your recording…"
+                      : recordingState === "ready"
+                        ? "Your recording was uploaded successfully."
+                        : recordingState === "failed"
+                          ? "Recording needs attention. End the call again to retry the upload."
+                          : recordingAuthorized
+                            ? "Both participants consented. Waiting for a stable audio connection."
+                            : mediaStatus === "connected"
+                              ? "Recording is unavailable until both participants consent."
+                              : "Recording authorization has not been confirmed."}
               </Text>
 
               <View style={styles.actionRow}>
@@ -1110,6 +1321,48 @@ export function CallsScreen({ user, route, navigation }: Props) {
           Live media supports one-to-one audio calls.
         </Text>
       </View>
+
+      {recordingRecoveries.length > 0 ? (
+        <View style={{ gap: 12, marginBottom: 20 }}>
+          <Text style={styles.sectionTitle}>Recording recovery</Text>
+          {recordingRecoveries.map((recovery) => {
+            const isRetrying =
+              working === `recording-recovery:${recovery.callId}`;
+
+            return (
+              <View key={recovery.callId} style={styles.callCard}>
+                <Text style={styles.callTitle}>Saved call recording</Text>
+                <Text style={styles.summaryMuted}>
+                  {recovery.status === "CAPTURE_PENDING"
+                    ? "Recording was interrupted before the WAV file was finalized. This incomplete capture cannot be uploaded."
+                    : recovery.status === "UPLOADED"
+                      ? "The audio file was uploaded. Retry confirmation to finish saving it."
+                      : "A finalized audio file is saved on this device and needs to be uploaded."}
+                </Text>
+                {recovery.status !== "CAPTURE_PENDING" &&
+                recovery.recording ? (
+                  <Button
+                    onPress={() => void retryRecordingRecovery(recovery)}
+                    loading={isRetrying}
+                    disabled={Boolean(working)}
+                  >
+                    Retry recording upload
+                  </Button>
+                ) : recovery.status === "CAPTURE_PENDING" ? (
+                  <Button
+                    secondary
+                    onPress={() => discardIncompleteRecording(recovery)}
+                    loading={working === `recording-discard:${recovery.callId}`}
+                    disabled={Boolean(working)}
+                  >
+                    Discard incomplete recording
+                  </Button>
+                ) : null}
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
 
       <View style={styles.historyHeader}>
         <Pressable

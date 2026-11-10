@@ -95,6 +95,16 @@ export function ConversationScreen({ route, userId }: Props) {
   const [networkConnected, setNetworkConnected] = useState<boolean | null | undefined>(null);
   const [networkInternetReachable, setNetworkInternetReachable] = useState<boolean | null | undefined>(null);
   const networkUpdateVersion = useRef(0);
+  const [previousScopeKey, setPreviousScopeKey] = useState(scopeKey);
+
+  // Reset conversation-specific state before rendering a newly selected peer.
+  if (previousScopeKey !== scopeKey) {
+    setPreviousScopeKey(scopeKey);
+    setHistoryFailed(false);
+    setError('');
+    setHasMore(false);
+    setOlderCursor(null);
+  }
 
   useEffect(() => {
     let active = true;
@@ -149,11 +159,6 @@ export function ConversationScreen({ route, userId }: Props) {
 
   useEffect(() => {
     const controller = new AbortController();
-
-    setHistoryFailed(false);
-    setError('');
-    setHasMore(false);
-    setOlderCursor(null);
 
     const loadHistory = async () => {
       try {
@@ -521,7 +526,7 @@ export function ConversationScreen({ route, userId }: Props) {
 
 const styles = StyleSheet.create({
   messages: { flex: 1, minHeight: 0 },
-  editContainer: { gap: 8, minWidth: 180 },
+  editContainer: { gap: 8, minWidth: 0 },
   editInput: { color: colors.text, fontSize: 14, lineHeight: 20, minHeight: 48, maxHeight: 140, borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 8 },
   editActions: { flexDirection: 'row', gap: 16, alignItems: 'center' },
   editCancelText: { color: colors.muted, fontSize: 11, fontWeight: '800' },
