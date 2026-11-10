@@ -303,6 +303,9 @@ func newHandlerWithStoreAndWorkerHealth(
 	router.Use(requestIDMiddleware(), accessLogMiddleware(), gin.Recovery())
 	router.Use(corsMiddleware())
 
+	router.GET("/docs", swaggerUIHandler)
+	router.GET("/openapi.json", openAPIHandler)
+
 	router.GET("/healthz", healthHandler)
 	router.GET("/rabbitmqz", func(c *gin.Context) {
 		if publisher == nil || !publisher.Ready() {
@@ -328,6 +331,21 @@ func newHandlerWithStoreAndWorkerHealth(
 			Status:  "ready",
 			Service: "go-api",
 		})
+	})
+
+	router.GET("/worker-health", func(c *gin.Context) {
+		snapshotter, ok := worker.(workerHealthSnapshotter)
+		if !ok {
+			c.JSON(http.StatusOK, workerHealthSnapshot{
+				Workers: []workerHealth{
+					{Worker: "go-worker", Status: "unknown"},
+					{Worker: "recording-worker", Status: "unknown"},
+					{Worker: "multi-agent-worker", Status: "unknown"},
+				},
+			})
+			return
+		}
+		c.JSON(http.StatusOK, snapshotter.Snapshot(c.Request.Context()))
 	})
 
 	internal := router.Group("/internal/v1")
