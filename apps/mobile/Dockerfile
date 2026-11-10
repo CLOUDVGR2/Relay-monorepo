@@ -22,3 +22,6 @@ ENV EXPO_NO_TELEMETRY=1
 EXPOSE 8081
 
 CMD ["pnpm", "exec", "expo", "start", "--host", "lan", "--port", "8081"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:8081/status').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"
