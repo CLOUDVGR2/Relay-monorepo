@@ -1,6 +1,6 @@
 module github.com/CLOUDVGR2/Relay/services/jobs-worker
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/rabbitmq/amqp091-go v1.15.0
