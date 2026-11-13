@@ -1,10 +1,6 @@
 # Relay
 
-**A real-time collaboration, AI knowledge, and operational intelligence platform.**
-
-Relay is a polyglot application platform that combines browser and native mobile experiences with real-time communication, GraphQL and REST APIs, asynchronous execution, AI-assisted knowledge workflows, and Kubernetes-oriented infrastructure. The repository is structured as a pnpm monorepo with independently packaged services written in TypeScript/JavaScript, Go, and Python.
-
-The platform brings together product engineering and distributed-systems concerns in one coherent system: identity propagation, resource-level authorization, API composition, durable job processing, tenant-scoped retrieval, media workflows, operational telemetry, and repeatable delivery.
+Relay brings together the full spectrum of modern software and platform engineering required to architect, develop, integrate, secure, deploy, and operate complex cloud-native application ecosystems. Its engineering scope spans cross-platform web and mobile development, backend architecture and API integrations, artificial intelligence and intelligent knowledge systems, real-time communication, distributed services and asynchronous processing, data engineering and storage infrastructure, cloud architecture, infrastructure as code, container orchestration, DevSecOps, CI/CD automation, and end-to-end observability. Built across TypeScript, JavaScript, Go, and Python, Relay unifies independently structured applications, backend services, AI workloads, processing systems, and infrastructure components within a cohesive, polyglot engineering ecosystem. The architecture integrates application development, API composition, service-to-service communication, identity and authorization, messaging, persistence, cloud infrastructure, automated delivery, security controls, and operational intelligence—demonstrating the engineering of interconnected software systems across the complete application and infrastructure lifecycle.
 
 ## Product surface
 
