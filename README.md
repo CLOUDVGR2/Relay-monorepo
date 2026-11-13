@@ -1,16 +1,30 @@
 # Relay
 
-Relay is a cloud-native software engineering platform encompassing full-stack application development, backend architecture, artificial intelligence, distributed processing, data infrastructure, cloud engineering, security, and platform operations. Its architecture integrates independently structured applications, services, and infrastructure into a cohesive engineering ecosystem spanning the complete software lifecycle.
+Relay is an enterprise-grade, cloud-native engineering ecosystem spanning Full-Stack and Mobile Development, AI and Agentic Systems, Distributed Architecture, Data Engineering, Cloud Infrastructure, Security, and Platform Operations.
 
-The application layer combines web and native mobile development using React, React Native, Expo, and Tailwind CSS. Backend services leverage TypeScript, JavaScript, Node.js, NestJS, Express, Go, and Python, with REST and GraphQL supporting API architecture, application integration, and service communication.
+Its architecture integrates React, React Native and Expo with independently deployable backend services built using TypeScript, Node.js, Express, NestJS, Go and Python. REST, GraphQL, and asynchronous messaging enable scalable API architectures and distributed service communication.
 
-AI engineering is a core platform capability, incorporating Retrieval-Augmented Generation (RAG), multi-agent architectures, DAG-based workflow orchestration, and vector search through PostgreSQL and pgvector. These capabilities support intelligent knowledge retrieval, semantic search, contextual information grounding, and coordinated AI workflows. The architecture encompasses document ingestion, knowledge processing, embedding generation, vector storage, similarity retrieval, context assembly, and retrieval-augmented response generation. Multi-agent workflows introduce specialized agent responsibilities, coordinated task execution, and structured interactions between intelligent components, while directed acyclic graph (DAG) orchestration provides a framework for organizing dependent processing stages and complex AI workflows. Tenant-aware retrieval and access boundaries extend these capabilities into controlled, context-sensitive knowledge systems.
+AI capabilities include RAG, multi-agent systems, DAG-based orchestration, vector search, and tenant-aware knowledge retrieval, powered by PostgreSQL, pgvector, and intelligent processing pipelines.
 
-The platform further integrates RabbitMQ, asynchronous workers, and real-time media workflows, including recording authorization and consent management. Its data architecture incorporates PostgreSQL, pgvector, MongoDB, Redis, and RustFS across relational persistence, vector storage and retrieval, document-oriented data, caching, and object storage.
+The data and messaging infrastructure incorporates PostgreSQL, MongoDB, Redis, RabbitMQ, RustFS, and asynchronous workers, supporting relational and document persistence, caching, event-driven processing, and object storage.
 
-Cloud and infrastructure engineering incorporate AWS, Terraform, Docker, Docker Compose, and Kubernetes, supporting infrastructure as code, containerization, deployment architecture, and service orchestration. The delivery and operational ecosystem combines GitHub Actions, Jenkins, Prometheus, and Grafana for automated engineering workflows, continuous integration and delivery, monitoring, and observability. Security-oriented architecture incorporates identity propagation, authentication, resource-level authorization, tenant isolation, and service access controls.
+Cloud-native infrastructure leverages AWS, Terraform, Docker, and Kubernetes, while GitHub Actions and Jenkins drive CI/CD. Prometheus and Grafana provide observability, monitoring, and operational intelligence. Security architecture encompasses identity propagation, authentication, authorization, tenant isolation, and service-level access controls.
 
-Relay demonstrates engineering capability across AI and Agentic Systems Engineering, RAG and Knowledge Engineering, Full-Stack and Mobile Development, Backend and API Engineering, Cloud Architecture, Distributed Systems, Data Engineering, DevSecOps, Platform Engineering, and Site Reliability Engineering.
+Relay demonstrates end-to-end engineering across:
+
+AI & Agentic Systems Engineering
+
+Full-Stack & Mobile Engineering
+
+Backend, APIs & Microservices
+
+Distributed Systems & Event-Driven Architecture
+
+Data Engineering & Knowledge Systems
+
+Cloud Infrastructure & Kubernetes
+
+DevSecOps, Platform Engineering & SRE
 
 ## Product surface
 
