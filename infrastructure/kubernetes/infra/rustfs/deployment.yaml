@@ -51,6 +51,8 @@ spec:
             - name: RUSTFS_CONSOLE_ENABLE
               value: "false"
           volumeMounts:
+            - name: tmp
+              mountPath: /tmp
             - name: rustfs-data
               mountPath: /data
           resources:
@@ -77,11 +79,14 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 5
           securityContext:
+            readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
             capabilities:
               drop:
                 - ALL
       volumes:
+        - name: tmp
+          emptyDir: {}
         - name: rustfs-data
           persistentVolumeClaim:
             claimName: rustfs-data
