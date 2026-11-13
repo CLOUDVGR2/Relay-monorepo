@@ -581,6 +581,50 @@ async def test_process_heartbeat_publishes_worker_state_and_ttl():
 
 
 @pytest.mark.asyncio
+async def test_process_heartbeat_retries_after_transient_failure(monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from app.recordings.worker import RecordingWorker, WorkerConfig
+
+    redis_client = Mock()
+    worker = RecordingWorker(
+        session_factory=Mock(),
+        repository=Mock(),
+        storage=Mock(),
+        transcriber=Mock(),
+        config=WorkerConfig(
+            database_url="postgresql+asyncpg://worker:worker@localhost/relay"
+        ),
+        redis_client=redis_client,
+    )
+
+    publish = AsyncMock(
+        side_effect=[ConnectionError("temporary Redis failure"), None]
+    )
+    worker._publish_process_heartbeat = publish
+
+    waits = 0
+
+    async def fake_wait_for(awaitable, timeout):
+        nonlocal waits
+        waits += 1
+        awaitable.close()
+        if waits == 1:
+            assert timeout == 5
+            return
+        worker.request_stop()
+        return
+
+    monkeypatch.setattr(asyncio, "wait_for", fake_wait_for)
+
+    await worker._run_process_heartbeat()
+
+    assert publish.await_count == 2
+    assert worker.stopping.is_set()
+
+
+@pytest.mark.asyncio
 async def test_run_removes_process_heartbeat_on_shutdown():
     from unittest.mock import AsyncMock
 

@@ -7,3 +7,4 @@ data:
   redis-url: "redis://redis:6379"
   client-url: "http://localhost:8088,https://relay.chat"
   python-ai-url: "http://python-ai:8000"
+  nest-api-url: "http://nest-api:3000"

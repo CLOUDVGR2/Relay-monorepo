@@ -292,3 +292,47 @@ func TestSubmitJobFailsClosedWithoutConfiguredToken(t *testing.T) {
 		t.Fatal("request published without configured authentication")
 	}
 }
+
+func TestRabbitMQPublisherStartsWhenBrokerIsUnavailable(t *testing.T) {
+	publisher, err := newRabbitMQPublisher("amqp://guest:guest@127.0.0.1:1/")
+	if err != nil {
+		t.Fatalf("constructor returned error: %v", err)
+	}
+	if publisher == nil {
+		t.Fatal("constructor returned a nil publisher")
+	}
+	defer publisher.Close()
+
+	if publisher.Ready() {
+		t.Fatal("publisher should not be ready while RabbitMQ is unavailable")
+	}
+}
+
+func TestJobsMetricsExposeRequestCounters(t *testing.T) {
+	runtime := newJobsRuntime(&fakePublisher{ready: true}, "test-secret", nil, nil, false)
+
+	appRecorder := httptest.NewRecorder()
+	appRequest := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	runtime.handler.ServeHTTP(appRecorder, appRequest)
+
+	if appRecorder.Code != http.StatusOK {
+		t.Fatalf("application status = %d, want 200", appRecorder.Code)
+	}
+
+	metricsRecorder := httptest.NewRecorder()
+	metricsRequest := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	runtime.metricsHandler.ServeHTTP(metricsRecorder, metricsRequest)
+
+	if metricsRecorder.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d, want 200", metricsRecorder.Code)
+	}
+
+	expected := `relay_http_requests_total{method="GET",route="/healthz",status_code="200"} 1`
+	if !strings.Contains(metricsRecorder.Body.String(), expected) {
+		t.Fatalf("metrics output does not contain %q:\n%s", expected, metricsRecorder.Body.String())
+	}
+
+	if strings.Contains(metricsRecorder.Body.String(), `route="/metrics"`) {
+		t.Fatal("metrics scrape should not be counted as an application request")
+	}
+}

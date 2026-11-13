@@ -51,6 +51,11 @@ spec:
             secretKeyRef:
               name: python-ai-secret
               key: python-ai-token
+        - name: AI_PROVIDER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: python-ai-secret
+              key: openai-api-key
         envFrom:
         - configMapRef:
             name: python-ai-config

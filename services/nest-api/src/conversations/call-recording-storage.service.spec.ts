@@ -167,12 +167,42 @@ describe('CallRecordingStorageService', () => {
     );
   });
 
-  it('rejects download URL creation without an explicit public endpoint', async () => {
+  it('uses AWS regional S3 and the default credential chain without static credentials', async () => {
+    getSignedUrlMock.mockResolvedValue(
+      'https://relay-call-recordings.s3.us-east-1.amazonaws.com/test.wav',
+    );
+
+    const service = createService({
+      CALL_RECORDING_STORAGE_BUCKET: 'relay-call-recordings',
+      CALL_RECORDING_STORAGE_REGION: 'us-east-1',
+    });
+
+    const result = await service.createDownloadUrl('calls/call-1/track-1.wav');
+
+    expect(result.expiresIn).toBe(300);
+    expect(clientConfigMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        region: 'us-east-1',
+        endpoint: undefined,
+        forcePathStyle: false,
+      }),
+    );
+    const clientConfig = clientConfigMock.mock.calls[0][0];
+    expect(clientConfig).not.toHaveProperty('credentials');
+  });
+
+  it('rejects storage configuration with only one static credential', async () => {
+    const service = createService({
+      CALL_RECORDING_STORAGE_BUCKET: 'relay-call-recordings',
+      CALL_RECORDING_STORAGE_REGION: 'us-east-1',
+      CALL_RECORDING_STORAGE_ACCESS_KEY_ID: 'test-access-key',
+    });
+
     await expect(
-      createService().createDownloadUrl('calls/call-1/track-1.wav'),
+      service.createUploadUrl('calls/call-1/track-1.wav', 'audio/wav'),
     ).rejects.toBeInstanceOf(ServiceUnavailableException);
 
-    expect(getSignedUrlMock).not.toHaveBeenCalled();
+    expect(clientConfigMock).not.toHaveBeenCalled();
   });
 
   it('verifies an uploaded object using HeadObject', async () => {

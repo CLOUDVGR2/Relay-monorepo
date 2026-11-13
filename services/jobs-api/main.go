@@ -298,9 +298,20 @@ func newHandlerWithStoreAndWorkerHealth(
 	worker workerHealthChecker,
 	requireWorker bool,
 ) http.Handler {
+	return newJobsRuntime(publisher, token, store, worker, requireWorker).handler
+}
+
+func newJobsRuntime(
+	publisher JobPublisher,
+	token string,
+	store jobStatusStore,
+	worker workerHealthChecker,
+	requireWorker bool,
+) *jobsRuntime {
+	metrics := newJobsMetrics()
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
-	router.Use(requestIDMiddleware(), accessLogMiddleware(), gin.Recovery())
+	router.Use(requestIDMiddleware(), accessLogMiddleware(), gin.Recovery(), metrics.middleware())
 	router.Use(corsMiddleware())
 
 	router.GET("/docs", swaggerUIHandler)
@@ -357,10 +368,20 @@ func newHandlerWithStoreAndWorkerHealth(
 		internal.GET("/jobs/:id", jobDetailHandler(store))
 	}
 
-	return router
+	return &jobsRuntime{
+		handler:        router,
+		metricsHandler: metrics.handler(),
+	}
 }
 
 func main() {
+	if err := run(); err != nil {
+		log.Printf("Jobs API stopped: %v", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8081"
@@ -368,17 +389,17 @@ func main() {
 
 	token := os.Getenv("INTERNAL_API_TOKEN")
 	if strings.TrimSpace(token) == "" {
-		log.Fatal("INTERNAL_API_TOKEN must be configured")
+		return errors.New("INTERNAL_API_TOKEN must be configured")
 	}
 
 	rabbitURL, err := rabbitMQURLFromEnv()
 	if err != nil {
-		log.Fatalf("RabbitMQ configuration: %v", err)
+		return errors.New("RabbitMQ configuration: " + err.Error())
 	}
 
 	publisher, err := newRabbitMQPublisher(rabbitURL)
 	if err != nil {
-		log.Fatalf("RabbitMQ startup: %v", err)
+		return errors.New("RabbitMQ startup: " + err.Error())
 	}
 	defer func() {
 		if err := publisher.Close(); err != nil {
@@ -388,55 +409,107 @@ func main() {
 
 	redisURL := strings.TrimSpace(os.Getenv("REDIS_URL"))
 	if redisURL == "" {
-		log.Fatal("REDIS_URL must be configured")
+		return errors.New("REDIS_URL must be configured")
 	}
+
 	redisOptions, err := redis.ParseURL(redisURL)
 	if err != nil {
-		log.Fatalf("Redis configuration: %v", err)
+		return errors.New("Redis configuration: " + err.Error())
 	}
+
 	redisClient := redis.NewClient(redisOptions)
 	redisCtx, redisCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if err := redisClient.Ping(redisCtx).Err(); err != nil {
 		redisCancel()
 		_ = redisClient.Close()
-		log.Fatalf("Redis startup: %v", err)
+		return errors.New("Redis startup: " + err.Error())
 	}
 	redisCancel()
+
 	defer func() {
 		if err := redisClient.Close(); err != nil {
 			log.Printf("Redis shutdown: %v", err)
 		}
 	}()
+
 	store := newRedisJobStatusStore(redisClient)
+	runtime := newJobsRuntime(
+		publisher,
+		token,
+		store,
+		&redisWorkerHealthChecker{client: redisClient},
+		true,
+	)
 
 	server := &http.Server{
 		Addr:              ":" + port,
-		Handler:           newHandlerWithWorkerHealth(publisher, token, store, &redisWorkerHealthChecker{client: redisClient}),
+		Handler:           runtime.handler,
 		ReadHeaderTimeout: 5 * time.Second,
-		MaxHeaderBytes:    1 << 20, // Bound header parsing and per-connection memory.
+		MaxHeaderBytes:    1 << 20,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
+	metricsServer := &http.Server{
+		Addr:              ":9091",
+		Handler:           runtime.metricsHandler,
+		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	type listenerError struct {
+		name string
+		err  error
+	}
+
+	serverErrors := make(chan listenerError, 2)
+
 	go func() {
-		log.Printf("Go API listening on %s", server.Addr)
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("HTTP server failed: %v", err)
-			stop()
-		}
+		log.Printf("Jobs API listening on %s", server.Addr)
+		serverErrors <- listenerError{name: "application", err: server.ListenAndServe()}
 	}()
 
-	<-ctx.Done()
+	go func() {
+		log.Printf("Jobs API metrics listening on %s", metricsServer.Addr)
+		serverErrors <- listenerError{name: "metrics", err: metricsServer.ListenAndServe()}
+	}()
+
+	var serveErr error
+
+	select {
+	case <-ctx.Done():
+		log.Printf("Shutdown signal received")
+	case result := <-serverErrors:
+		if errors.Is(result.err, http.ErrServerClosed) {
+			serveErr = errors.New(result.name + " listener stopped unexpectedly")
+		} else {
+			serveErr = errors.New(result.name + " listener failed: " + result.err.Error())
+		}
+		stop()
+	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Graceful shutdown failed: %v", err)
+		log.Printf("Application server graceful shutdown failed: %v", err)
 		_ = server.Close()
+		if serveErr == nil {
+			serveErr = errors.New("application server shutdown failed: " + err.Error())
+		}
 	}
+
+	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Metrics server graceful shutdown failed: %v", err)
+		_ = metricsServer.Close()
+		if serveErr == nil {
+			serveErr = errors.New("metrics server shutdown failed: " + err.Error())
+		}
+	}
+
+	return serveErr
 }

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.document import Document, DocumentChunk
 from app.models.tenant import Tenant
 from app.rag.chunking import chunk_text
-from app.rag.embeddings import OllamaEmbeddingClient
+from app.rag.embeddings import get_embedding_client
 
 
 MAX_DOCUMENT_CHARACTERS = 1_000_000
@@ -67,7 +67,7 @@ async def ingest_document(
     if not chunks:
         raise ValueError("content did not produce any chunks")
 
-    embedding_client = embedder or OllamaEmbeddingClient()
+    embedding_client = embedder or get_embedding_client()
     document_id = uuid.uuid4()
 
     try:

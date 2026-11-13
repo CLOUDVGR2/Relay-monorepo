@@ -34,6 +34,10 @@
 ## 4. Secrets and data protection
 
 - [ ] Create required Kubernetes Secrets through an approved secure process or integrate AWS Secrets Manager with an approved synchronization mechanism.
+- [ ] If using ESO, install a reviewed release and configure its AWS provider, EKS Pod Identity, and `external-secrets` ServiceAccount.
+- [ ] Review the optional Terraform ESO IAM role and Pod Identity association; verify access is limited to the seven intended `relay/dev/` secret records.
+- [ ] Create and review ESO `SecretStore`/`ClusterSecretStore` and `ExternalSecret` manifests; verify all seven existing Kubernetes Secret names and required keys synchronize correctly.
+- [ ] Test secret rotation and application reload behavior; review customer-managed KMS permissions separately if applicable.
 - [ ] Supply the required keys for `backend-secret`, `go-api-secret`, `nest-api-secret`, `python-ai-secret`, `mongodb-secret`, `postgres-secret`, and `rabbitmq-secret`.
 - [ ] Never commit real credentials, tokens, private keys, or populated environment files.
 - [ ] Confirm encryption at rest and in transit where supported.

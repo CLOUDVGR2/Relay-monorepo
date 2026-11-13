@@ -8,3 +8,10 @@ data:
   CLIENT_URL: http://localhost:5173,http://127.0.0.1:5173,http://localhost:8088,http://127.0.0.1:8088
   REDIS_URL: redis://redis:6379
   GO_API_BASE_URL: http://go-api:8081
+  CALL_EVENTS_BASE_URL: http://backend:5001
+  PYTHON_AI_BASE_URL: http://python-ai:8000
+  CALL_RECORDING_STORAGE_BUCKET: relay-call-recordings
+  CALL_RECORDING_STORAGE_ENDPOINT: http://rustfs:9000
+  CALL_RECORDING_STORAGE_PUBLIC_ENDPOINT: http://localhost:9000
+  CALL_RECORDING_STORAGE_FORCE_PATH_STYLE: "true"
+  CALL_RECORDING_STORAGE_REGION: us-east-1

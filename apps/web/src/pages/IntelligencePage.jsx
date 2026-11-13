@@ -25,13 +25,12 @@ import {
 } from "recharts";
 
 const NEST_API_URL = (
-  import.meta.env.VITE_NEST_API_URL ||
-  (import.meta.env.DEV ? "http://localhost:3000" : window.location.origin)
+  window.location.origin
 ).replace(/\/+$/, "");
 
 const EXPRESS_API_URL = (
   import.meta.env.MODE === "development"
-    ? "http://localhost:5001/api"
+    ? "/api"
     : "/api"
 ).replace(/\/+$/, "");
 

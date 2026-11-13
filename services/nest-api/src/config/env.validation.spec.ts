@@ -216,7 +216,7 @@ describe('validateEnvironment', () => {
         REDIS_URL: 'redis://redis.example.com:6379',
       }),
     ).toThrow(
-      'Call-recording storage bucket, region, access key, and secret key must be configured in production.',
+      'Call-recording storage bucket and region must be configured in production.',
     );
   });
 
@@ -236,7 +236,7 @@ describe('validateEnvironment', () => {
         CALL_RECORDING_STORAGE_BUCKET: 'relay-call-recordings',
       }),
     ).toThrow(
-      'Call-recording storage bucket, region, access key, and secret key must be configured together.',
+      'Call-recording storage bucket and region must be configured together.',
     );
   });
 
@@ -265,17 +265,31 @@ describe('validateEnvironment', () => {
     );
   });
 
-  it('requires a public storage endpoint in production', () => {
+  it('accepts production AWS storage with IAM credentials and no public endpoint', () => {
+    const result = validateEnvironment({
+      ...validConfig,
+      NODE_ENV: 'production',
+      CLIENT_URL: 'https://example.com',
+      REDIS_URL: 'redis://redis.example.com:6379',
+      CALL_RECORDING_STORAGE_BUCKET: 'relay-call-recordings',
+      CALL_RECORDING_STORAGE_REGION: 'us-east-1',
+    });
+
+    expect(result['CALL_RECORDING_STORAGE_BUCKET']).toBe('relay-call-recordings');
+    expect(result['CALL_RECORDING_STORAGE_REGION']).toBe('us-east-1');
+    expect(result['CALL_RECORDING_STORAGE_FORCE_PATH_STYLE']).toBe(false);
+  });
+
+  it('rejects static storage credentials when only one is configured', () => {
     expect(() =>
       validateEnvironment({
         ...validConfig,
-        NODE_ENV: 'production',
-        CLIENT_URL: 'https://example.com',
-        REDIS_URL: 'redis://redis.example.com:6379',
-        ...validStorageConfig,
+        CALL_RECORDING_STORAGE_BUCKET: 'relay-call-recordings',
+        CALL_RECORDING_STORAGE_REGION: 'us-east-1',
+        CALL_RECORDING_STORAGE_ACCESS_KEY_ID: 'test-access-key',
       }),
     ).toThrow(
-      'CALL_RECORDING_STORAGE_PUBLIC_ENDPOINT must be configured in production.',
+      'CALL_RECORDING_STORAGE_ACCESS_KEY_ID and CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY must be configured together.',
     );
   });
 

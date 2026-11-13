@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 
 const EXPRESS_API_URL = (
-  import.meta.env.MODE === "development" ? "http://localhost:5001/api" : "/api"
+  import.meta.env.MODE === "development" ? "/api" : "/api"
 ).replace(/\/+$/, "");
 
 async function fetchExpressJson(url) {
@@ -51,7 +51,7 @@ const HEALTH_CHECKS = [
   },
   {
     id: "nestjs",
-    url: import.meta.env.VITE_NEST_HEALTH_URL || (import.meta.env.DEV ? "http://localhost:3000/health/ready" : "/health/ready"),
+    url: "/health/ready",
   },
   {
     id: "go",
@@ -252,8 +252,7 @@ export default function OperationsOverview() {
 
   const loadQueuedJobs = useCallback(async () => {
     const apiBaseUrl = (
-      import.meta.env.VITE_NEST_API_URL ||
-      (import.meta.env.DEV ? "http://localhost:3000" : window.location.origin)
+      window.location.origin
     ).replace(/\/+$/, "");
 
     if (!apiBaseUrl) {

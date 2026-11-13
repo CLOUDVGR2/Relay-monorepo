@@ -2,7 +2,7 @@ FROM golang:1.27.4-alpine AS build
 
 WORKDIR /src
 
-COPY go.mod ./
+COPY go.mod go.sum ./
 COPY *.go ./
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
@@ -23,6 +23,6 @@ COPY --from=build --chown=10001:10001 \
 
 USER 10001:10001
 
-EXPOSE 8090
+EXPOSE 8090 9091
 
 ENTRYPOINT ["/app/api-gateway"]

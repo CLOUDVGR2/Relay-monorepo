@@ -61,6 +61,26 @@ spec:
             secretKeyRef:
               name: nest-api-secret
               key: internal-api-token
+        - name: CALL_EVENTS_INTERNAL_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: nest-api-secret
+              key: CALL_EVENTS_INTERNAL_TOKEN
+        - name: PYTHON_AI_INTERNAL_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: nest-api-secret
+              key: PYTHON_AI_INTERNAL_TOKEN
+        - name: CALL_RECORDING_STORAGE_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: nest-api-secret
+              key: CALL_RECORDING_STORAGE_ACCESS_KEY_ID
+        - name: CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: nest-api-secret
+              key: CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY
         envFrom:
         - configMapRef:
             name: nest-api-config

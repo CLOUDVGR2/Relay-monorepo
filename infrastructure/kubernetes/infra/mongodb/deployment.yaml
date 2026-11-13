@@ -22,7 +22,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: mongodb
-        image: mongo:8
+        image: mongo:8.0
         securityContext:
           runAsNonRoot: true
           runAsUser: 999
@@ -67,11 +67,13 @@ spec:
               "db.adminCommand(\"ping\")"
           initialDelaySeconds: 30
           periodSeconds: 10
+          timeoutSeconds: 10
         readinessProbe:
           exec:
             command: *id001
           initialDelaySeconds: 10
           periodSeconds: 5
+          timeoutSeconds: 10
         startupProbe:
           exec:
             command:

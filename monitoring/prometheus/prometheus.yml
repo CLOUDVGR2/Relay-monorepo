@@ -19,7 +19,7 @@ scrape_configs:
       - targets:
           - http://express-api:5001/api/health/ready
           - http://nest-api:3000/health/ready
-          - http://api-gateway:8090/healthz
+          - http://api-gateway:8090/readyz
           - http://jobs-api:8081/readyz
     relabel_configs:
       - source_labels: [__address__]
@@ -38,3 +38,9 @@ scrape_configs:
       - targets: ["nest-api:3000"]
         labels:
           service: nest-api
+      - targets: ["api-gateway:9091"]
+        labels:
+          service: api-gateway
+      - targets: ["jobs-api:9091"]
+        labels:
+          service: jobs-api

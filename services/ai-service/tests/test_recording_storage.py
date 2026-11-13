@@ -82,17 +82,51 @@ def test_rejects_empty_object_key(mock_boto_client, storage_env):
 
 
 @patch("app.recordings.storage.boto3.client")
-def test_rejects_missing_configuration(mock_boto_client, monkeypatch):
+def test_uses_aws_default_credentials_when_static_credentials_are_absent(
+    mock_boto_client,
+    monkeypatch,
+):
+    monkeypatch.setenv("CALL_RECORDING_STORAGE_BUCKET", "relay-call-recordings")
+    monkeypatch.setenv("CALL_RECORDING_STORAGE_REGION", "us-east-1")
+    monkeypatch.delenv("CALL_RECORDING_STORAGE_ENDPOINT", raising=False)
+    monkeypatch.delenv("CALL_RECORDING_STORAGE_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY", raising=False)
+    monkeypatch.delenv("CALL_RECORDING_STORAGE_FORCE_PATH_STYLE", raising=False)
+
+    storage = RecordingStorage()
+
+    assert storage.bucket == "relay-call-recordings"
+    mock_boto_client.assert_called_once()
+    _, kwargs = mock_boto_client.call_args
+    assert kwargs["endpoint_url"] is None
+    assert kwargs["region_name"] == "us-east-1"
+    assert "aws_access_key_id" not in kwargs
+    assert "aws_secret_access_key" not in kwargs
+    assert kwargs["config"].s3["addressing_style"] == "auto"
+
+
+@patch("app.recordings.storage.boto3.client")
+def test_rejects_incomplete_static_credentials(mock_boto_client, monkeypatch):
+    monkeypatch.setenv("CALL_RECORDING_STORAGE_BUCKET", "relay-call-recordings")
+    monkeypatch.setenv("CALL_RECORDING_STORAGE_REGION", "us-east-1")
+    monkeypatch.setenv("CALL_RECORDING_STORAGE_ACCESS_KEY_ID", "test-access")
+    monkeypatch.delenv("CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="must be configured together"):
+        RecordingStorage()
+
+    mock_boto_client.assert_not_called()
+
+
+@patch("app.recordings.storage.boto3.client")
+def test_rejects_missing_bucket_and_region(mock_boto_client, monkeypatch):
     for name in (
-        "CALL_RECORDING_STORAGE_ENDPOINT",
         "CALL_RECORDING_STORAGE_BUCKET",
         "CALL_RECORDING_STORAGE_REGION",
-        "CALL_RECORDING_STORAGE_ACCESS_KEY_ID",
-        "CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY",
     ):
         monkeypatch.delenv(name, raising=False)
 
-    with pytest.raises(ValueError, match="CALL_RECORDING_STORAGE_ENDPOINT"):
+    with pytest.raises(ValueError, match="CALL_RECORDING_STORAGE_BUCKET"):
         RecordingStorage()
 
     mock_boto_client.assert_not_called()

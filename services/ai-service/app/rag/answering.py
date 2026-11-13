@@ -7,7 +7,7 @@ from typing import Protocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.rag.ingestion import EmbeddingProvider
-from app.rag.generation import GenerationError, OllamaGenerationClient
+from app.rag.generation import GenerationError, get_generation_client
 from app.rag.retrieval import RetrievedChunk, retrieve_chunks
 
 
@@ -104,7 +104,7 @@ async def answer_question(
         for chunk in chunks
     ]
 
-    selected_generator = generator or OllamaGenerationClient()
+    selected_generator = generator or get_generation_client()
 
     try:
         raw_response = await selected_generator.generate(
@@ -116,7 +116,7 @@ async def answer_question(
             ),
         )
     except GenerationError as exc:
-        raise AnsweringError("Local answer generation failed") from exc
+        raise AnsweringError("Answer generation failed") from exc
 
     try:
         payload = json.loads(raw_response)

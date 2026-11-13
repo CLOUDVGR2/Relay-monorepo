@@ -20,7 +20,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from app.agentops.conversation_analysis import analyze_conversation
+from app.db.ssl import database_connect_args
+from app.recordings.ai_client import analyze_conversation
 from app.recordings.repository import (
     ClaimedRecordingJob,
     RecordingJobRepository,
@@ -476,8 +477,17 @@ class RecordingWorker:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.exception("Recording worker process heartbeat failed")
-                return
+                logger.exception(
+                    "Recording worker process heartbeat failed; retrying in 5 seconds"
+                )
+                try:
+                    await asyncio.wait_for(
+                        self.stopping.wait(),
+                        timeout=5,
+                    )
+                except TimeoutError:
+                    pass
+                continue
 
             try:
                 await asyncio.wait_for(
@@ -564,6 +574,7 @@ async def main() -> None:
 
     engine = create_async_engine(
         config.database_url,
+        connect_args=database_connect_args(),
         pool_pre_ping=True,
         pool_size=1,
         max_overflow=0,

@@ -49,12 +49,6 @@ export class CallRecordingStorageService {
   async createDownloadUrl(
     objectKey: string,
   ): Promise<{ downloadUrl: string; expiresIn: number }> {
-    if (!this.config.get<string>('CALL_RECORDING_STORAGE_PUBLIC_ENDPOINT')) {
-      throw new ServiceUnavailableException(
-        'Public call recording storage endpoint is not configured.',
-      );
-    }
-
     const { client, bucket } = this.getStorage('public');
 
     const command = new GetObjectCommand({
@@ -113,7 +107,11 @@ export class CallRecordingStorageService {
       'CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY',
     );
 
-    if (!bucket || !region || !accessKeyId || !secretAccessKey) {
+    if (
+      !bucket ||
+      !region ||
+      Boolean(accessKeyId) !== Boolean(secretAccessKey)
+    ) {
       throw new ServiceUnavailableException(
         'Call recording storage is not configured.',
       );
@@ -129,12 +127,6 @@ export class CallRecordingStorageService {
     const endpoint =
       endpointType === 'public' ? publicEndpoint : internalEndpoint;
 
-    if (endpointType === 'public' && !endpoint) {
-      throw new ServiceUnavailableException(
-        'Public call recording storage endpoint is not configured.',
-      );
-    }
-
     const existingClient =
       endpointType === 'public' ? this.publicClient : this.internalClient;
 
@@ -145,10 +137,9 @@ export class CallRecordingStorageService {
         forcePathStyle:
           this.config.get<boolean>('CALL_RECORDING_STORAGE_FORCE_PATH_STYLE') ??
           false,
-        credentials: {
-          accessKeyId,
-          secretAccessKey,
-        },
+        ...(accessKeyId && secretAccessKey
+          ? { credentials: { accessKeyId, secretAccessKey } }
+          : {}),
       });
 
       if (endpointType === 'public') {

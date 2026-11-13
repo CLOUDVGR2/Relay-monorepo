@@ -36,30 +36,51 @@ func main() {
 		// when proxy routes are introduced.
 	}
 
+	metricsServer := &http.Server{
+		Addr:              ":9091",
+		Handler:           runtime.metricsHandler,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	serverErrors := make(chan error, 1)
+	serverErrors := make(chan error, 2)
 	go func() {
 		logger.Info("gateway starting", "address", server.Addr)
 		serverErrors <- server.ListenAndServe()
 	}()
+	go func() {
+		logger.Info("gateway metrics listener starting", "address", metricsServer.Addr)
+		serverErrors <- metricsServer.ListenAndServe()
+	}()
 
+	var serveErr error
 	select {
-	case err := <-serverErrors:
-		if !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("gateway server failed", "error", err)
-			os.Exit(1)
+	case serveErr = <-serverErrors:
+		if !errors.Is(serveErr, http.ErrServerClosed) {
+			logger.Error("gateway listener failed", "error", serveErr)
 		}
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+	}
 
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			logger.Error("graceful shutdown failed", "error", err)
-			_ = server.Close()
-			os.Exit(1)
-		}
-		logger.Info("gateway stopped")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		logger.Error("gateway shutdown failed", "error", err)
+		_ = server.Close()
+		_ = metricsServer.Close()
+		os.Exit(1)
+	}
+	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error("metrics listener shutdown failed", "error", err)
+		_ = metricsServer.Close()
+		os.Exit(1)
+	}
+	logger.Info("gateway stopped")
+	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+		os.Exit(1)
 	}
 }

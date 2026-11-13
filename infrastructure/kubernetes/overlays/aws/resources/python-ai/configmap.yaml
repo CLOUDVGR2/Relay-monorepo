@@ -5,6 +5,5 @@ metadata:
 data:
   AI_PROVIDER: litellm
   CLIENT_URL: https://relay.example.com
-  LITELLM_API_BASE: http://host.docker.internal:11434
-  LITELLM_MODEL: ollama_chat/qwen2.5:3b-instruct
-  OLLAMA_BASE_URL: http://host.docker.internal:11434
+  LITELLM_MODEL: openai/gpt-4o-mini
+  LITELLM_EMBEDDING_MODEL: text-embedding-3-small

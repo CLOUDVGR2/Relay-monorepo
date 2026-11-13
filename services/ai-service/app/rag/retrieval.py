@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.document import Document, DocumentChunk
-from app.rag.embeddings import OllamaEmbeddingClient
+from app.rag.embeddings import get_embedding_client
 
 
 EMBEDDING_DIMENSIONS = 768
@@ -81,7 +81,7 @@ async def retrieve_chunks(
     # Retrieve extra candidates before combining rankings.
     candidate_k = min(top_k * 3, MAX_TOP_K)
 
-    embedding_client = embedder or OllamaEmbeddingClient()
+    embedding_client = embedder or get_embedding_client()
     query_vector = await embedding_client.embed(query)
 
     if len(query_vector) != EMBEDDING_DIMENSIONS:

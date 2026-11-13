@@ -17,12 +17,19 @@ resources:
   - resources/go-api/service.yaml
   - resources/go-worker/deployment.yaml
   - resources/go-worker/configmap.yaml
+  - resources/recording-storage/serviceaccount.yaml
   - resources/nest-api/deployment.yaml
+  - resources/storageclass-gp3.yaml
+  - resources/recording-worker/pvc.yaml
+  - resources/recording-worker/deployment.yaml
   - resources/nest-api/configmap.yaml
   - resources/nest-api/service.yaml
   - resources/python-ai/deployment.yaml
   - resources/python-ai/configmap.yaml
   - resources/python-ai/service.yaml
+  - resources/api-gateway/configmap.yaml
+  - resources/api-gateway/deployment.yaml
+  - resources/api-gateway/service.yaml
   - ingress.yaml
 
 labels:
@@ -39,6 +46,9 @@ images:
   - name: relay-backend
     newName: AWS_ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/relay-backend
     newTag: REPLACE_WITH_IMAGE_TAG
+  - name: relay-api-gateway
+    newName: AWS_ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/relay-api-gateway
+    newTag: REPLACE_WITH_IMAGE_TAG
   - name: relay-go-api
     newName: AWS_ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/relay-go-api
     newTag: REPLACE_WITH_IMAGE_TAG
@@ -51,6 +61,21 @@ images:
   - name: relay-python-ai
     newName: AWS_ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/relay-python-ai
     newTag: REPLACE_WITH_IMAGE_TAG
+  - name: relay-recording-worker
+    newName: AWS_ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/relay-recording-worker
+    newTag: REPLACE_WITH_IMAGE_TAG
+  - name: redis
+    newName: AWS_ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/relay-redis
+    newTag: 7-alpine
+  - name: rabbitmq
+    newName: AWS_ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/relay-rabbitmq
+    newTag: 4-management
+  - name: mongo
+    newName: AWS_ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/relay-mongodb
+    newTag: "8"
+  - name: pgvector/pgvector
+    newName: AWS_ACCOUNT_ID.dkr.ecr.AWS_REGION.amazonaws.com/relay-postgres
+    newTag: pg17
 
 patches:
   - path: backend-hpa-patch.yaml

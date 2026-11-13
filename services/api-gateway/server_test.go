@@ -25,19 +25,66 @@ func testHandler() http.Handler {
 }
 
 func TestHealthEndpoints(t *testing.T) {
-	for _, path := range []string{"/healthz", "/readyz"} {
-		t.Run(path, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			testHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	rec := httptest.NewRecorder()
+	testHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if rec.Header().Get("X-Request-ID") == "" {
+		t.Fatal("expected request ID response header")
+	}
+	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatal("expected security header")
+	}
+}
+
+func TestReadinessRequiresBothUpstreams(t *testing.T) {
+	tests := []struct {
+		name        string
+		expressCode int
+		nestCode    int
+		closeNest   bool
+		wantStatus  int
+	}{
+		{name: "both healthy", expressCode: http.StatusOK, nestCode: http.StatusOK, wantStatus: http.StatusOK},
+		{name: "express unhealthy", expressCode: http.StatusServiceUnavailable, nestCode: http.StatusOK, wantStatus: http.StatusServiceUnavailable},
+		{name: "nest unhealthy", expressCode: http.StatusOK, nestCode: http.StatusServiceUnavailable, wantStatus: http.StatusServiceUnavailable},
+		{name: "nest unreachable", expressCode: http.StatusOK, nestCode: http.StatusOK, closeNest: true, wantStatus: http.StatusServiceUnavailable},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			express := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/health/ready" {
+					t.Errorf("Express probe path = %q", r.URL.Path)
+				}
+				w.WriteHeader(tt.expressCode)
+			}))
+			defer express.Close()
+
+			nest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/health/ready" {
+					t.Errorf("Nest probe path = %q", r.URL.Path)
+				}
+				w.WriteHeader(tt.nestCode)
+			}))
+
+			if tt.closeNest {
+				nest.Close()
+			} else {
+				defer nest.Close()
 			}
-			if rec.Header().Get("X-Request-ID") == "" {
-				t.Fatal("expected request ID response header")
+
+			handler := newReadinessHandler(express.URL, nest.URL)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
 			}
-			if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
-				t.Fatal("expected security header")
+			if !strings.Contains(rec.Body.String(), `"dependencies"`) {
+				t.Fatalf("readiness response missing dependency details: %s", rec.Body.String())
 			}
 		})
 	}

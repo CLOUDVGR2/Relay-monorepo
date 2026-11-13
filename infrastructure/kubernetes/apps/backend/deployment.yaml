@@ -56,6 +56,31 @@ spec:
                 secretKeyRef:
                   name: backend-secret
                   key: python-ai-token
+            - name: NEST_API_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: nest-api-url
+            - name: CALL_EVENTS_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: CALL_EVENTS_INTERNAL_TOKEN
+            - name: CLOUDINARY_CLOUD_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: CLOUDINARY_CLOUD_NAME
+            - name: CLOUDINARY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: CLOUDINARY_API_KEY
+            - name: CLOUDINARY_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: CLOUDINARY_API_SECRET
           resources:
             requests:
               memory: "256Mi"

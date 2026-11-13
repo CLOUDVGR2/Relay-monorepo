@@ -102,3 +102,90 @@ class OllamaGenerationClient:
             raise GenerationError("Ollama returned an empty answer")
 
         return content.strip()
+
+class LiteLLMGenerationClient:
+    """JSON generation through LiteLLM, supporting hosted and local providers."""
+
+    def __init__(
+        self,
+        model: str | None = None,
+        timeout: float | None = None,
+        api_key: str | None = None,
+        api_base: str | None = None,
+    ) -> None:
+        self.model = (
+            model or os.getenv("LITELLM_MODEL", "openai/gpt-4o-mini")
+        ).strip()
+        self.api_key = (
+            api_key if api_key is not None else os.getenv("AI_PROVIDER_API_KEY", "")
+        ).strip()
+        self.api_base = (
+            api_base if api_base is not None else os.getenv("LITELLM_API_BASE", "")
+        ).strip() or None
+
+        try:
+            self.timeout = float(
+                timeout if timeout is not None
+                else os.getenv("LITELLM_TIMEOUT", "45")
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Generation timeout must be a number") from exc
+
+        if not self.model:
+            raise ValueError("model must not be empty")
+        if not 1 <= self.timeout <= 120:
+            raise ValueError("Generation timeout must be between 1 and 120 seconds")
+        if self.api_base and not self.api_base.startswith(("http://", "https://")):
+            raise ValueError("api_base must use HTTP or HTTPS")
+
+    async def generate(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> str:
+        if not isinstance(system_prompt, str) or not system_prompt.strip():
+            raise ValueError("system_prompt must not be empty")
+        if not isinstance(user_prompt, str) or not user_prompt.strip():
+            raise ValueError("user_prompt must not be empty")
+
+        try:
+            from litellm import acompletion
+
+            response = await acompletion(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format={"type": "json_object"},
+                timeout=self.timeout,
+                api_key=self.api_key or None,
+                api_base=self.api_base,
+                temperature=0.1,
+                max_tokens=800,
+            )
+        except Exception as exc:
+            raise GenerationError(
+                "AI provider generation request failed"
+            ) from exc
+
+        try:
+            choice = response.choices[0]
+            content = choice.message.content
+        except (AttributeError, IndexError, KeyError, TypeError) as exc:
+            raise GenerationError(
+                "AI provider returned an invalid response"
+            ) from exc
+
+        if not isinstance(content, str) or not content.strip():
+            raise GenerationError("AI provider returned an empty answer")
+
+        return content.strip()
+
+
+def get_generation_client():
+    """Select the answer-generation provider from AI_PROVIDER."""
+    if os.getenv("AI_PROVIDER", "mock").strip().lower() == "litellm":
+        return LiteLLMGenerationClient()
+    return OllamaGenerationClient()

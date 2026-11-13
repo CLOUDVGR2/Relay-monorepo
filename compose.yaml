@@ -206,13 +206,14 @@ services:
     environment:
       DATABASE_URL: "postgresql+asyncpg://atlas_ai:${ATLAS_POSTGRES_PASSWORD:?Set ATLAS_POSTGRES_PASSWORD in root .env}@postgres:5432/atlas_ai"
       REDIS_URL: redis://redis:6379
+      PYTHON_AI_BASE_URL: http://ai-service:8000
+      PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?Set PYTHON_AI_INTERNAL_TOKEN in root .env}
       CALL_RECORDING_STORAGE_ENDPOINT: http://rustfs:9000
       CALL_RECORDING_STORAGE_BUCKET: ${CALL_RECORDING_STORAGE_BUCKET:?Set CALL_RECORDING_STORAGE_BUCKET in root .env}
       CALL_RECORDING_STORAGE_REGION: ${CALL_RECORDING_STORAGE_REGION:?Set CALL_RECORDING_STORAGE_REGION in root .env}
       CALL_RECORDING_STORAGE_ACCESS_KEY_ID: ${CALL_RECORDING_STORAGE_ACCESS_KEY_ID:?Set CALL_RECORDING_STORAGE_ACCESS_KEY_ID in root .env}
       CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY: ${CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY:?Set CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY in root .env}
       CALL_RECORDING_STORAGE_FORCE_PATH_STYLE: ${CALL_RECORDING_STORAGE_FORCE_PATH_STYLE:-true}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       WHISPER_MODEL_SIZE: tiny
       WHISPER_DEVICE: cpu
       WHISPER_COMPUTE_TYPE: int8
@@ -233,6 +234,8 @@ services:
       redis:
         condition: service_healthy
       rustfs:
+        condition: service_healthy
+      ai-service:
         condition: service_healthy
     security_opt:
       - no-new-privileges:true

@@ -1,0 +1,53 @@
+name: Terraform Validation
+
+on:
+  pull_request:
+    paths:
+      - "infrastructure/aws/terraform/**"
+      - ".github/workflows/terraform-validation.yml"
+  push:
+    branches: [main, master]
+    paths:
+      - "infrastructure/aws/terraform/**"
+      - ".github/workflows/terraform-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  terraform-validation:
+    name: Validate AWS Terraform
+    runs-on: ubuntu-latest
+    env:
+      TF_IN_AUTOMATION: "true"
+
+    defaults:
+      run:
+        working-directory: infrastructure/aws/terraform
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.17.2"
+          terraform_wrapper: false
+
+      - name: Check Terraform formatting
+        run: terraform fmt -check -recursive
+
+      - name: Initialize Terraform without backend
+        run: terraform init -backend=false -input=false
+
+      - name: Validate Terraform configuration
+        run: terraform validate -no-color
+
+      - name: Run Terraform tests
+        run: terraform test -no-color

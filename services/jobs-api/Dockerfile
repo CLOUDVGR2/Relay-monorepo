@@ -1,4 +1,4 @@
-FROM golang:1.26.10-alpine AS build
+FROM golang:1.27.4-alpine AS build
 
 WORKDIR /src
 RUN apk add --no-cache ca-certificates
@@ -23,6 +23,6 @@ COPY --from=build --chown=10001:10001 /out/jobs-api /usr/local/bin/jobs-api
 
 USER 10001:10001
 
-EXPOSE 8081
+EXPOSE 8081 9091
 
 ENTRYPOINT ["/usr/local/bin/jobs-api"]

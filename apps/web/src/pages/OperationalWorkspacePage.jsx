@@ -18,7 +18,7 @@ import {
 
 const EXPRESS_API_URL = (
   import.meta.env.MODE === "development"
-    ? "http://localhost:5001/api"
+    ? "/api"
     : "/api"
 ).replace(/\/+$/, "");
 

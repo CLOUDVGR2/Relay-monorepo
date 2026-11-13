@@ -1,10 +1,15 @@
 """Structured, bounded conversation summarization using local generation."""
 
 import json
+import os
 
 from pydantic import ValidationError
 
-from app.rag.generation import GenerationError, OllamaGenerationClient
+from app.rag.generation import (
+    GenerationError,
+    OllamaGenerationClient,
+    get_generation_client,
+)
 from app.schemas.conversation_analysis import (
     ConversationAnalysisMessage,
     ConversationAnalysisResponse,
@@ -31,7 +36,12 @@ async def analyze_conversation(
     transcript = "\n".join(
         f"{message.sender}: {message.text}" for message in messages
     )
-    generator = client or OllamaGenerationClient()
+    if client is not None:
+        generator = client
+    elif os.getenv("AI_PROVIDER", "mock").strip().lower() == "litellm":
+        generator = get_generation_client()
+    else:
+        generator = OllamaGenerationClient()
 
     try:
         raw = await generator.generate(

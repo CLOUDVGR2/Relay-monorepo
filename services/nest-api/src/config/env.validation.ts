@@ -258,37 +258,53 @@ export function validateEnvironment(
   }
 
   // Validate private call-recording object storage configuration.
-  const storageKeys = [
+  const requiredStorageKeys = [
     'CALL_RECORDING_STORAGE_BUCKET',
     'CALL_RECORDING_STORAGE_REGION',
-    'CALL_RECORDING_STORAGE_ACCESS_KEY_ID',
-    'CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY',
   ] as const;
-  const configuredStorageKeys = storageKeys.filter(
+  const configuredStorageKeys = requiredStorageKeys.filter(
     (key) =>
       config[key] !== undefined && config[key] !== null && config[key] !== '',
   );
 
   if (
     nodeEnv === 'production' &&
-    configuredStorageKeys.length !== storageKeys.length
+    configuredStorageKeys.length !== requiredStorageKeys.length
   ) {
     throw new Error(
-      'Call-recording storage bucket, region, access key, and secret key must be configured in production.',
+      'Call-recording storage bucket and region must be configured in production.',
     );
   }
 
   if (
     configuredStorageKeys.length > 0 &&
-    configuredStorageKeys.length !== storageKeys.length
+    configuredStorageKeys.length !== requiredStorageKeys.length
   ) {
     throw new Error(
-      'Call-recording storage bucket, region, access key, and secret key must be configured together.',
+      'Call-recording storage bucket and region must be configured together.',
     );
   }
 
   for (const key of configuredStorageKeys) {
     requireNonEmptyString(config[key], key);
+  }
+
+  const accessKey = config['CALL_RECORDING_STORAGE_ACCESS_KEY_ID'];
+  const secretKey = config['CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY'];
+  const hasAccessKey =
+    accessKey !== undefined && accessKey !== null && accessKey !== '';
+  const hasSecretKey =
+    secretKey !== undefined && secretKey !== null && secretKey !== '';
+
+  if (hasAccessKey !== hasSecretKey) {
+    throw new Error(
+      'CALL_RECORDING_STORAGE_ACCESS_KEY_ID and CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY must be configured together.',
+    );
+  }
+
+  if (hasAccessKey) {
+    requireNonEmptyString(accessKey, 'CALL_RECORDING_STORAGE_ACCESS_KEY_ID');
+    requireNonEmptyString(secretKey, 'CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY');
   }
 
   const storageEndpoint = config['CALL_RECORDING_STORAGE_ENDPOINT'];
@@ -359,16 +375,6 @@ export function validateEnvironment(
         'CALL_RECORDING_STORAGE_PUBLIC_ENDPOINT must be a valid HTTP(S) origin without credentials, path, query, or fragment.',
       );
     }
-  }
-
-  if (
-    nodeEnv === 'production' &&
-    configuredStorageKeys.length === storageKeys.length &&
-    !publicStorageEndpoint
-  ) {
-    throw new Error(
-      'CALL_RECORDING_STORAGE_PUBLIC_ENDPOINT must be configured in production.',
-    );
   }
 
   const rawForcePathStyle = config['CALL_RECORDING_STORAGE_FORCE_PATH_STYLE'];

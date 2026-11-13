@@ -24,6 +24,8 @@ spec:
         ports:
         - name: http
           containerPort: 8081
+        - name: metrics
+          containerPort: 9091
         securityContext:
           runAsNonRoot: true
           runAsUser: 10001

@@ -57,7 +57,7 @@ describe("useAuthStore socket URL by environment", () => {
     useAuthStore.getState().connectSocket();
 
     expect(io).toHaveBeenCalledWith(
-      "http://localhost:5001",
+      "/",
       expect.objectContaining({
         withCredentials: true,
         autoConnect: false,

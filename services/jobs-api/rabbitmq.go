@@ -81,20 +81,21 @@ func openRabbitMQSession(url string) (
 }
 
 func newRabbitMQPublisher(url string) (*rabbitMQPublisher, error) {
-	conn, ch, confirms, err := openRabbitMQSession(url)
-	if err != nil {
-		return nil, err
-	}
-
 	p := &rabbitMQPublisher{
 		url:       url,
-		conn:      conn,
-		ch:        ch,
-		confirms:  confirms,
 		reconnect: make(chan struct{}, 1),
 		done:      make(chan struct{}),
 	}
-	p.ready.Store(true)
+
+	conn, ch, confirms, err := openRabbitMQSession(url)
+	if err != nil {
+		log.Printf("RabbitMQ initial connection failed; retrying in background: %v", err)
+	} else {
+		p.conn = conn
+		p.ch = ch
+		p.confirms = confirms
+		p.ready.Store(true)
+	}
 
 	go p.reconnectLoop()
 

@@ -12,6 +12,47 @@ export default defineConfig({
     restoreMocks: true,
   },
   plugins: [react(), tailwindcss()],
+  server: {
+    proxy: {
+      "/api": { target: "http://localhost:8090", changeOrigin: true },
+      "/socket.io": {
+        target: "http://localhost:8090",
+        changeOrigin: true,
+        ws: true,
+      },
+      "/jobs": { target: "http://localhost:8090", changeOrigin: true },
+      "/graphql": { target: "http://localhost:8090", changeOrigin: true },
+      "/calls": { target: "http://localhost:8090", changeOrigin: true },
+      "/docs": { target: "http://localhost:8090", changeOrigin: true },
+      "/health": { target: "http://localhost:8090", changeOrigin: true },
+      "/gateway/healthz": {
+        target: "http://localhost:8090",
+        changeOrigin: true,
+        rewrite: () => "/healthz",
+      },
+      "/gateway/readyz": {
+        target: "http://localhost:8090",
+        changeOrigin: true,
+        rewrite: () => "/readyz",
+      },
+      "/go/readyz": {
+        target: "http://localhost:8083",
+        changeOrigin: true,
+        rewrite: () => "/readyz",
+      },
+      "/go/worker-health": {
+        target: "http://localhost:8083",
+        changeOrigin: true,
+        rewrite: () => "/worker-health",
+      },
+      "/rabbitmqz": { target: "http://localhost:8083", changeOrigin: true },
+      "/python/readyz": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+        rewrite: () => "/readyz",
+      },
+    },
+  },
 
   build: {
     rolldownOptions: {

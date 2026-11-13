@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multi-agent-worker
+  labels:
+    app.kubernetes.io/name: multi-agent-worker
+    app.kubernetes.io/part-of: relay
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: multi-agent-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: multi-agent-worker
+        app.kubernetes.io/part-of: relay
+    spec:
+      terminationGracePeriodSeconds: 35
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: multi-agent-worker
+          image: relay-python-ai:local
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -m
+            - app.multi_agent.worker
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: python-ai-secret
+                  key: database-url
+            - name: MULTI_AGENT_PROVIDER
+              value: mock
+            - name: MULTI_AGENT_MODEL
+              value: ollama_chat/qwen2.5:3b-instruct
+            - name: MULTI_AGENT_TIMEOUT_SECONDS
+              value: "20"
+            - name: LOG_LEVEL
+              value: INFO
+          envFrom:
+            - configMapRef:
+                name: python-ai-config

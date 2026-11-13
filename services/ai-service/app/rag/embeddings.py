@@ -78,3 +78,108 @@ class OllamaEmbeddingClient:
             result.append(number)
 
         return result
+
+class LiteLLMEmbeddingClient:
+    """768-dimensional embeddings through LiteLLM."""
+
+    def __init__(
+        self,
+        model: str | None = None,
+        timeout: float = 20.0,
+        dimensions: int = 768,
+        api_key: str | None = None,
+        api_base: str | None = None,
+    ) -> None:
+        self.model = (
+            model or os.getenv(
+                "LITELLM_EMBEDDING_MODEL",
+                "text-embedding-3-small",
+            )
+        ).strip()
+        self.timeout = timeout
+        self.dimensions = dimensions
+        self.api_key = (
+            api_key if api_key is not None else os.getenv("AI_PROVIDER_API_KEY", "")
+        ).strip()
+        self.api_base = (
+            api_base if api_base is not None else os.getenv("LITELLM_API_BASE", "")
+        ).strip() or None
+
+        if not self.model:
+            raise ValueError("model must not be empty")
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not math.isfinite(float(timeout))
+            or timeout <= 0
+        ):
+            raise ValueError("timeout must be a finite positive number")
+        if (
+            isinstance(dimensions, bool)
+            or not isinstance(dimensions, int)
+            or dimensions < 1
+        ):
+            raise ValueError("dimensions must be a positive integer")
+        if self.api_base and not self.api_base.startswith(("http://", "https://")):
+            raise ValueError("api_base must use HTTP or HTTPS")
+
+    async def embed(self, text: str) -> list[float]:
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
+
+        text = text.strip()
+        if not text:
+            raise ValueError("text must not be empty")
+
+        try:
+            from litellm import aembedding
+
+            response = await aembedding(
+                model=self.model,
+                input=[text],
+                dimensions=self.dimensions,
+                timeout=self.timeout,
+                api_key=self.api_key or None,
+                api_base=self.api_base,
+            )
+        except Exception as exc:
+            raise EmbeddingError(
+                "AI provider embedding request failed"
+            ) from exc
+
+        try:
+            vector = response.data[0].embedding
+        except (AttributeError, IndexError, KeyError, TypeError) as exc:
+            raise EmbeddingError(
+                "AI provider response did not contain an embedding vector"
+            ) from exc
+
+        if not isinstance(vector, Sequence) or isinstance(vector, (str, bytes)):
+            raise EmbeddingError(
+                "AI provider response did not contain an embedding vector"
+            )
+
+        if len(vector) != self.dimensions:
+            raise EmbeddingError(
+                f"Expected {self.dimensions} embedding dimensions, got {len(vector)}"
+            )
+
+        result: list[float] = []
+        for value in vector:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise EmbeddingError("Embedding contains a non-numeric value")
+
+            number = float(value)
+            if not math.isfinite(number):
+                raise EmbeddingError("Embedding contains a non-finite value")
+
+            result.append(number)
+
+        return result
+
+
+def get_embedding_client():
+    """Select the RAG embedding provider from AI_PROVIDER."""
+    if os.getenv("AI_PROVIDER", "mock").strip().lower() == "litellm":
+        return LiteLLMEmbeddingClient()
+    return OllamaEmbeddingClient()

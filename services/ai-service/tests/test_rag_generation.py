@@ -138,6 +138,29 @@ async def test_empty_prompts_are_rejected_before_http(install_transport):
         await client.generate(system_prompt="Rules", user_prompt=" ")
 
 
+
+
+def test_generation_factory_selects_litellm(monkeypatch):
+    monkeypatch.setenv("AI_PROVIDER", "litellm")
+    client = generation.get_generation_client()
+    assert isinstance(client, generation.LiteLLMGenerationClient)
+
+
+@pytest.mark.parametrize("provider", ["mock", ""])
+def test_generation_factory_preserves_ollama_default(monkeypatch, provider):
+    monkeypatch.setenv("AI_PROVIDER", provider)
+    client = generation.get_generation_client()
+    assert isinstance(client, generation.OllamaGenerationClient)
+
+
+def test_generation_factory_defaults_to_ollama_when_unset(monkeypatch):
+    monkeypatch.delenv("AI_PROVIDER", raising=False)
+    assert isinstance(
+        generation.get_generation_client(),
+        generation.OllamaGenerationClient,
+    )
+
+
 def test_invalid_generation_configuration_is_rejected():
     with pytest.raises(ValueError, match="HTTP or HTTPS"):
         OllamaGenerationClient(base_url="ftp://localhost")

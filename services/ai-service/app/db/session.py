@@ -1,6 +1,5 @@
 """Data access and persistence integration for the Relay AI service."""
 
-
 import os
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -12,6 +11,8 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+
+from app.db.ssl import database_connect_args
 
 # Load the repository-level .env without printing or overriding existing variables.
 def find_repository_root() -> Path:
@@ -47,6 +48,7 @@ elif database_url.startswith("postgresql://"):
 
 engine = create_async_engine(
     database_url,
+    connect_args=database_connect_args(),
     pool_pre_ping=True,
     pool_size=5,
     max_overflow=10,

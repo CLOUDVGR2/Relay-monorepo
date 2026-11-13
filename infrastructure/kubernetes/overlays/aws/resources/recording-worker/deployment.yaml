@@ -1,0 +1,110 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recording-worker
+  namespace: relay
+  labels:
+    app.kubernetes.io/name: recording-worker
+    app.kubernetes.io/part-of: relay
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: recording-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: recording-worker
+        app.kubernetes.io/part-of: relay
+    spec:
+      serviceAccountName: relay-recording-worker-storage
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 300
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: recording-worker
+          image: relay-recording-worker:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: python-ai-secret
+                  key: database-url
+            - name: REDIS_URL
+              value: redis://redis:6379
+            - name: PYTHON_AI_BASE_URL
+              value: http://python-ai:8000
+            - name: PYTHON_AI_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: python-ai-secret
+                  key: python-ai-token
+            - name: CALL_RECORDING_STORAGE_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: nest-api-config
+                  key: CALL_RECORDING_STORAGE_BUCKET
+            - name: CALL_RECORDING_STORAGE_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: nest-api-config
+                  key: CALL_RECORDING_STORAGE_REGION
+            - name: CALL_RECORDING_STORAGE_FORCE_PATH_STYLE
+              valueFrom:
+                configMapKeyRef:
+                  name: nest-api-config
+                  key: CALL_RECORDING_STORAGE_FORCE_PATH_STYLE
+            - name: WHISPER_MODEL_SIZE
+              value: tiny
+            - name: WHISPER_DEVICE
+              value: cpu
+            - name: WHISPER_COMPUTE_TYPE
+              value: int8
+            - name: WHISPER_CPU_THREADS
+              value: "2"
+            - name: RECORDING_JOB_LEASE_SECONDS
+              value: "120"
+            - name: RECORDING_JOB_HEARTBEAT_SECONDS
+              value: "40"
+            - name: RECORDING_JOB_MAX_ATTEMPTS
+              value: "3"
+            - name: RECORDING_JOB_RETRY_DELAY_SECONDS
+              value: "30"
+            - name: RECORDING_WORKER_POLL_SECONDS
+              value: "3"
+            - name: LOG_LEVEL
+              value: INFO
+          volumeMounts:
+            - name: model-cache
+              mountPath: /home/worker/.cache/huggingface
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+              ephemeral-storage: "256Mi"
+            limits:
+              cpu: "2"
+              memory: 2Gi
+              ephemeral-storage: "512Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: recording-worker-cache
+        - name: tmp
+          emptyDir:
+            sizeLimit: "256Mi"

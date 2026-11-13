@@ -7,6 +7,8 @@ resources:
 - ../../apps/python-ai
 - ../../apps/go-api
 - ../../apps/go-worker
+- ../../apps/multi-agent-worker
+- ../../apps/recording-worker
 - ../../apps/frontend
 - ingress.yaml
 patches:

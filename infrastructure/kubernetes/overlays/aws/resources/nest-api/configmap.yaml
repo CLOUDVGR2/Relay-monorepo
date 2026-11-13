@@ -8,3 +8,7 @@ data:
   CLIENT_URL: https://relay.example.com
   REDIS_URL: redis://redis:6379
   GO_API_BASE_URL: http://go-api:8081
+  PYTHON_AI_BASE_URL: http://python-ai:8000
+  CALL_RECORDING_STORAGE_BUCKET: relay-call-recordings
+  CALL_RECORDING_STORAGE_REGION: us-east-1
+  CALL_RECORDING_STORAGE_FORCE_PATH_STYLE: 'false'

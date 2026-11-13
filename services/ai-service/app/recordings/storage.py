@@ -21,11 +21,8 @@ class RecordingStorage:
         missing = [
             name
             for name, value in (
-                ("CALL_RECORDING_STORAGE_ENDPOINT", endpoint),
                 ("CALL_RECORDING_STORAGE_BUCKET", bucket),
                 ("CALL_RECORDING_STORAGE_REGION", region),
-                ("CALL_RECORDING_STORAGE_ACCESS_KEY_ID", access_key),
-                ("CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY", secret_key),
             )
             if not value
         ]
@@ -36,26 +33,33 @@ class RecordingStorage:
                 + ", ".join(missing)
             )
 
+        if bool(access_key) != bool(secret_key):
+            raise ValueError(
+                "CALL_RECORDING_STORAGE_ACCESS_KEY_ID and "
+                "CALL_RECORDING_STORAGE_SECRET_ACCESS_KEY must be configured together"
+            )
+
         force_path_style = (
-            os.getenv("CALL_RECORDING_STORAGE_FORCE_PATH_STYLE", "true").lower()
+            os.getenv("CALL_RECORDING_STORAGE_FORCE_PATH_STYLE", "false").lower()
             in {"1", "true", "yes", "on"}
         )
 
         self.bucket = bucket
-        self.client = boto3.client(
-            "s3",
-            endpoint_url=endpoint,
-            region_name=region,
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
-            config=Config(
+        client_options = {
+            "endpoint_url": endpoint,
+            "region_name": region,
+            "config": Config(
                 s3={
-                    "addressing_style": (
-                        "path" if force_path_style else "auto"
-                    )
+                    "addressing_style": "path" if force_path_style else "auto"
                 }
             ),
-        )
+        }
+
+        if access_key and secret_key:
+            client_options["aws_access_key_id"] = access_key
+            client_options["aws_secret_access_key"] = secret_key
+
+        self.client = boto3.client("s3", **client_options)
 
     @contextmanager
     def download_to_tempfile(self, object_key: str) -> Iterator[Path]:

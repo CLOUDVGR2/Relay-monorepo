@@ -14,6 +14,8 @@ spec:
     metadata:
       labels: *id001
     spec:
+      serviceAccountName: relay-nest-api-recording-storage
+      automountServiceAccountToken: false
       securityContext:
         seccompProfile:
           type: RuntimeDefault
@@ -61,6 +63,11 @@ spec:
             secretKeyRef:
               name: nest-api-secret
               key: internal-api-token
+        - name: PYTHON_AI_INTERNAL_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: nest-api-secret
+              key: python-ai-token
         envFrom:
         - configMapRef:
             name: nest-api-config

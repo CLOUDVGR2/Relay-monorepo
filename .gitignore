@@ -110,3 +110,22 @@ apps/mobile/*.mobileprovision
 /services/api-gateway/api-gateway
 /services/jobs-api/jobs-api
 /services/jobs-worker/jobs-worker
+
+# Terraform local state, caches, plans, and overrides
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfplan.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.auto.tfvars
+*.auto.tfvars.json
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+!*.tfvars.json.example
