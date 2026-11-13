@@ -1,36 +1,39 @@
-## Summary
+## Engineering change
 
-<!-- State the problem, the change, and the intended user or operator impact. -->
+**Purpose**
+<!-- State the user, operator, or platform outcome. -->
 
-## Scope and ownership
+**Owning components**
+<!-- Identify source directories and runtime services. -->
 
-- Owning application/service:
-- Affected consumers or contracts:
-- Data/schema/event changes:
-- Deployment/configuration changes:
+## Contract and data impact
+
+- [ ] HTTP / GraphQL / Socket.IO / AMQP contracts reviewed
+- [ ] Database schema, indexes, and migration compatibility reviewed
+- [ ] Environment variables and deployment configuration reviewed
+- [ ] Downstream consumers and version compatibility reviewed
+
+## Security and reliability
+
+- [ ] Authentication and resource authorization reviewed
+- [ ] Tenant and ownership boundaries tested
+- [ ] Input bounds, timeouts, retries, and idempotency reviewed
+- [ ] Secrets and sensitive telemetry handling reviewed
+- [ ] Failure, recovery, and shutdown behavior considered
 
 ## Verification evidence
 
 | Check | Command / environment | Result |
 |---|---|---|
-| Focused tests | | Not run |
-| Broader tests | | Not run |
-| Build / static analysis | | Not run |
-| Compose / deployment validation | | Not run |
+| Focused tests | | |
+| Integration / E2E tests | | |
+| Build / typecheck / lint | | |
+| Container / Kustomize / Terraform validation | | |
+| Security / dependency scanning | | |
 
-## Risk and rollout
+## Release and documentation
 
-- Security / authorization / privacy considerations:
-- Failure modes and observability:
-- Migration and rollback plan:
-- Known limitations or follow-up work:
-
-## Review checklist
-
-- [ ] Behavior and service ownership are explicit.
-- [ ] API, event, and schema compatibility was assessed.
-- [ ] Tests cover the changed behavior and relevant failure paths.
-- [ ] Configuration examples contain no real secrets.
-- [ ] Comments explain intent or invariants and remain accurate.
-- [ ] Documentation and operational references match the implementation.
-- [ ] Validation statements reflect commands actually run.
+- [ ] Migration and rollout sequence documented
+- [ ] Rollback compatibility assessed
+- [ ] Architecture/API/operations docs updated
+- [ ] Validation reflects the exact commit under review

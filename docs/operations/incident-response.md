@@ -1,65 +1,42 @@
-# Incident response and operational runbooks
+# Incident Response and Service Operations
 
-## 1. Severity and command
+## Incident roles
 
-Use the organization's approved incident severity policy. At minimum, distinguish broad user impact/data loss/security exposure from partial degradation and isolated defects. Assign an incident commander, technical lead, communications owner and scribe for high-severity incidents. Keep one timeline and one authoritative status channel.
+For high-impact events, assign an incident commander, technical lead, communications owner, and timeline scribe. Maintain one authoritative status channel and one event timeline.
 
-## 2. First 10 minutes
+## Initial response
 
-1. Confirm impact from user-visible SLIs, not one pod's status.
-2. Stop risky deployments and automated jobs that amplify impact.
-3. Identify the last known good artifact/configuration and the affected service boundary.
-4. Preserve relevant logs, metrics, traces and queue/database state; avoid collecting unnecessary user content or secrets.
-5. Apply the smallest reversible mitigation: rollback, reduce concurrency, disable a noncritical feature, or fail closed.
-6. Communicate current impact, scope, mitigation and next update time.
+1. Confirm impact using user-facing indicators and representative journeys.
+2. Pause changes that could amplify the incident.
+3. Identify affected services, versions, configuration, and dependencies.
+4. Preserve relevant logs, metrics, traces, queue state, and database evidence.
+5. Apply the smallest reversible mitigation.
+6. Communicate impact, scope, mitigation, and the next update time.
 
-## 3. Symptom runbooks
+## Service-specific diagnostic paths
 
-### Elevated API 5xx or latency
+### API latency or elevated 5xx
+Segment by route, method, version, status, and upstream. Correlate request IDs across gateway and services. Compare latency with CPU, memory, event-loop delay, Go goroutines, database pool wait, connection count, and dependency timeout metrics.
 
-- Segment by route, version, status and upstream; compare latency with CPU, RSS, event-loop delay, Go goroutines, DB pool wait and connection counts.
-- Check recent deploy/config changes and downstream timeouts. A 502 at the gateway may represent upstream failure; correlate by request ID.
-- Reduce load on the saturated dependency, cap concurrency, and shed optional work. Avoid increasing retries without a deadline and retry budget.
-- Roll back only after verifying schema compatibility and the target artifact's provenance.
-
-### Queue backlog or repeated failures
-
-- Inspect ready/unacked depth, oldest message age, consumer count, redelivery rate, job duration, DLQ and dependency health.
-- Pause or rate-limit producers if the backlog is growing faster than consumers can drain it.
-- Identify poison payloads and permanent validation failures; quarantine rather than retry forever.
-- Confirm idempotency before replaying messages. Record accepted, started, completed, failed and replayed counts.
+### Queue backlog
+Inspect ready and unacknowledged messages, oldest message age, consumer count, redelivery rate, job duration, worker heartbeat, and dead-letter depth. Rate-limit producers when accepted work exceeds safe processing capacity. Verify idempotency before replay.
 
 ### AI provider degradation
+Separate retrieval/database errors from provider errors. Inspect provider status, rate limits, timeout class, model configuration, token usage, and concurrency. Apply only approved fallback behavior and preserve data-handling guarantees.
 
-- Check provider timeout/rate-limit/error classes, model/config changes, token consumption and concurrent requests.
-- Apply bounded concurrency and deadlines; use a documented fallback only if quality and privacy behavior are acceptable.
-- Do not silently send sensitive data to a different provider or model. Disable noncritical generation if required and preserve core messaging paths.
-- Distinguish retrieval failure from generation failure and report degraded behavior explicitly.
+### Database saturation
+Inspect connection utilization, query latency, locks, storage health, and migration activity. Bound client concurrency and avoid coordinated restart storms. Verify data integrity before restoring write traffic.
 
-### Database unavailable or connection pool saturated
+### Recording workflow
+Trace call authorization, upload session creation, object metadata, completion validation, storage availability, worker lease/heartbeat, transcription, and downstream analysis as distinct lifecycle stages.
 
-- Check DB service health, connection usage, query latency, locks and recent migrations.
-- Reduce request/worker concurrency; do not restart all clients simultaneously if that creates a reconnect storm.
-- Restore service or roll back the incompatible change. Validate data integrity before re-enabling writes.
+### Security event
+Preserve audit evidence, revoke compromised credentials, restrict affected access, determine impacted identities and data, and follow applicable notification and legal requirements.
 
-### Suspected security incident
+## Recovery verification
 
-- Preserve evidence and involve the security owner immediately.
-- Revoke compromised credentials and restrict affected access; do not post secrets or payloads into public issue trackers.
-- Determine affected identities, resources, time window and exfiltration scope from audit logs.
-- Follow applicable notification/legal requirements; document containment and credential rotation.
+Confirm user journeys, authorization boundaries, queue progress, data integrity, dependency load, and monitoring stability. Keep the incident active until the agreed observation window is satisfied.
 
-## 4. Recovery verification
+## Post-incident engineering record
 
-After mitigation, verify user journeys, authorization boundaries, queue progress, data integrity and downstream load. Keep the incident open until metrics stabilize over an agreed observation window. Follow with a blameless review that identifies systemic controls, action owners and due dates—not only individual mistakes.
-
-## 5. Review template
-
-- Impact and duration:
-- Detection source and time:
-- Timeline:
-- Root cause and contributing conditions:
-- What worked / what delayed recovery:
-- Data integrity and security assessment:
-- Corrective actions (owner, due date, measurable acceptance criteria):
-- Tests/alerts/runbooks added:
+Capture impact, timeline, detection, technical cause, contributing conditions, data/security assessment, mitigations, and corrective actions. Each action should have an owner, due date, and measurable acceptance criterion.

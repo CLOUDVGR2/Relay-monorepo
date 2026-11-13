@@ -1,25 +1,25 @@
-# Relay AI Assistant — User Guide
+# Relay AI Assistant User Guide
 
 ## Purpose
-The Relay AI Assistant answers questions using documents indexed for the authenticated Relay account. It uses retrieval-augmented generation (RAG) to find relevant document chunks and returns an answer with source references when available.
 
-## Asking Questions
-- Open the authenticated Relay application and navigate to `/ai`.
-- Enter a question about the available indexed documentation.
-- Submit the question and review the answer.
-- Open the Sources section to inspect the source title, source URI, chunk index, and character offsets when provided.
-- Start a new conversation to clear the current page's displayed conversation.
+Relay's AI capabilities provide document-grounded question answering, conversation analysis, incident investigation assistance, and coordinated multi-agent task execution.
 
-## Suggested Uses
-- Ask for facts explicitly documented in indexed sources.
-- Ask for summaries of available documentation.
-- Ask for troubleshooting steps described by the indexed material.
-- Ask follow-up questions with precise terminology when a result is too broad.
+## Document questions
 
-## Evidence and Limitations
-Answers depend on the documents available to the current account and the relevance of retrieved chunks. A missing answer does not prove that information does not exist elsewhere. Verify important answers against the original source.
+Users can submit documents into their tenant workspace and ask natural-language questions about the ingested material. The retrieval workflow searches tenant-scoped chunks and returns answer content with source citations. Citations identify the evidence used to construct the answer; they should be reviewed when decisions depend on the result.
 
-When evidence is insufficient, the assistant may state that it cannot answer reliably. An answer without citations should not be treated as independently verified.
+## Conversation analysis
 
-## Privacy
-The UI describes the assistant as private to the account. The backend's Python document routes scope document operations by the authenticated Relay user ID. Treat these as documented design behavior; confirm cross-user isolation with security tests rather than relying on UI wording alone.
+Conversation analysis transforms supplied transcript content into structured outputs such as concise summaries, decisions, and follow-up actions. The result is an analysis artifact, not a replacement for the original conversation record.
+
+## Incident intelligence
+
+Incident workflows organize evidence and investigation results. The workflow distinguishes investigation from approval and execution so that proposed remediation is reviewed before an action is performed.
+
+## Multi-agent tasks
+
+Multi-agent tasks are submitted as durable work items. The client can retrieve task status, progress phases, results, and completion timestamps independently from the worker process.
+
+## Responsible use
+
+AI-generated content is decision support. Verify citations, confirm operational facts against authoritative systems, and require human review for consequential actions. Do not submit secrets or personal data unless the deployment's data handling policy explicitly permits it.

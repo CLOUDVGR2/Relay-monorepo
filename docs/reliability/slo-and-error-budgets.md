@@ -1,59 +1,44 @@
-# Reliability objectives and error budgets
+# Reliability Objectives and Error Budgets
 
-This document defines a proposed measurement contract. Targets are initial engineering goals, not measured claims. Service owners must approve targets against product requirements and measured baseline before using them as contractual SLOs.
+## Service indicators
 
-## 1. User-visible indicators
+Define indicators around user-visible outcomes rather than process uptime alone.
 
-| Indicator | Definition | Initial target for production candidate |
-|---|---|---|
-| API availability | eligible requests returning a valid non-5xx response / eligible requests | 99.9% over rolling 30 days |
-| API latency | successful and failed eligible request latency, segmented by route class | p95 < 300 ms for non-AI synchronous APIs; p99 < 1 s, excluding explicitly long-running work |
-| AI request latency | end-to-end request latency by provider/model and token class | establish baseline; set separate interactive and async objectives |
-| Job completion | accepted jobs reaching a terminal state within the published deadline | ≥ 99% within 5 minutes for supported short jobs, subject to workload validation |
-| Queue freshness | age of oldest ready message | alert on sustained growth; initial warning at 60 s, critical at 5 min |
-| Data recovery | demonstrated restore point and restore duration | RPO/RTO must be approved per data class before production |
+| Domain | Candidate indicator |
+|---|---|
+| Authentication | Successful authorized login and session validation rate |
+| Messaging | Message submission success and delivery latency |
+| GraphQL | Successful authorized operation rate and latency |
+| Calls | Call setup success, media authorization success, and lifecycle completion |
+| Recording | Upload completion and processing completion rate |
+| Jobs | Accepted-to-completed ratio, queue age, and worker processing latency |
+| RAG | Successful ingestion, retrieval relevance, and answer latency |
+| Multi-agent | Task completion rate, execution duration, and failure distribution |
+| Platform | Availability of public ingress and critical dependencies |
 
-Exclude only documented, genuinely ineligible traffic (for example, malformed requests before admission). Do not remove 5xx responses, timeouts, dependency failures, or overload rejections merely to improve an SLI. Publish both availability and admission/overload rates.
+Set numerical SLOs only after establishing representative traffic, measurement windows, and service ownership.
 
-## 2. Error-budget policy
+## Error-budget policy
 
-For a 99.9% monthly availability target, the nominal budget is 0.1% of eligible requests (approximately 43.8 minutes only if measured as time-based availability; request-based SLOs must be computed from request counts instead). Use a rolling window and an agreed query as the source of truth.
+An error budget is the permitted unreliability within a defined SLO window. When consumption accelerates, prioritize reliability work and constrain nonessential release risk according to the organization's policy. Budget exhaustion should trigger a documented decision, not an automatic assumption about root cause.
 
-- **Healthy budget:** normal delivery; preserve required gates.
-- **Budget burn:** prioritize reliability defects and reduce risky changes.
-- **Fast burn / customer impact:** stop rollout, mitigate, communicate, and use the incident process.
-- **Budget exhausted:** pause nonessential launches until the owner-approved recovery plan is met.
+## Health semantics
 
-Do not use uptime of a process as a proxy for end-to-end availability. Readiness, dependency health, user journey success, queue completion and data integrity are distinct signals.
+- **Liveness** indicates that a process can continue making progress.
+- **Readiness** indicates that an instance can safely accept its assigned work.
+- **Dependency health** reports a defined set of dependency checks.
+- **Synthetic checks** exercise representative user journeys with controlled test identities.
 
-## 3. Health semantics
+Do not make liveness depend on optional remote services; doing so can create restart cascades.
 
-- **Liveness:** process can make progress. Do not fail liveness solely because a remote dependency is down; doing so can create restart storms.
-- **Readiness:** instance can safely accept the traffic/work assigned to it. Include only dependencies whose absence makes the instance unable to serve correctly.
-- **Startup:** allow migrations, model initialization and connection-pool warmup a bounded startup window before liveness applies.
-- **Synthetic checks:** exercise a low-cost, authenticated or carefully scoped representative journey without mutating user data.
+## Resilience patterns
 
-Health endpoints must not disclose dependency credentials, raw exception messages, topology details or arbitrary environment values.
+Use end-to-end deadlines, bounded retries with jitter, idempotency for retried mutations, connection-pool limits, concurrency caps, and queue prefetch. Distinguish transient failures from permanent validation errors. Use circuit breakers only with explicit state, bounded probes, and recovery tests.
 
-## 4. Resilience patterns
+## Capacity and availability
 
-1. Set a total request deadline and derive smaller dependency deadlines from remaining time.
-2. Retry only transient errors, only within the caller's remaining deadline, with capped exponential backoff and jitter. Never retry a non-idempotent mutation without an idempotency key or durable deduplication.
-3. Use bounded connection pools, per-dependency concurrency limits and queue prefetch. A timeout without a concurrency limit can still exhaust resources.
-4. Use bulkheads to isolate slow providers and optional features from core chat/API paths.
-5. Circuit breakers are justified only with observable state, carefully selected failure signals, bounded half-open probes and tests for recovery. Do not wrap every call by default.
-6. Reject excess work explicitly (429/503 with retry guidance where appropriate) instead of queuing unbounded requests in memory.
-7. For queue workers, distinguish retryable errors from permanent validation/business failures; cap attempts and route poison messages to a monitored dead-letter path.
-8. During shutdown, stop admitting new work, cancel consumers, drain within the termination grace period, and leave uncompleted messages recoverable.
+Replicas do not provide high availability if they share a single failure domain or stateful dependency. Autoscaling requires resource requests, metrics, scale-up headroom, downstream capacity, and scale-down stabilization. Stateful components require supported replication, backup, restore, and upgrade procedures.
 
-## 5. Deployment and availability
+## Resilience exercises
 
-- Replicas are not high availability if all replicas share one failure domain, one non-replicated database, one zone or one credential dependency.
-- Use at least two failure domains for critical stateless services when the platform supports it; use topology spread/anti-affinity and disruption budgets after capacity is verified.
-- Autoscaling requires working resource requests, metrics-server or equivalent, scale-up headroom, scale-down stabilization, and a test that the downstream database/broker can tolerate the new concurrency.
-- Stateful components need supported replication, backup, restore, quorum and upgrade procedures. A Kubernetes Deployment with one database pod is not a production HA database.
-- Rollouts must have readiness probes, bounded surge/unavailability, a rollback artifact, and schema compatibility across old/new versions.
-
-## 6. Required resilience exercises
-
-Before a production claim, run and retain evidence for: database connection loss, broker restart, Redis loss, AI provider timeout/rate-limit, malformed provider output, worker crash after side effect but before acknowledgement, duplicate delivery, SIGTERM under load, slow client, saturated connection pool, and rollback with an in-flight schema migration.
+Exercise dependency loss, queue redelivery, worker restart, database recovery, provider timeout, object-store unavailability, and graceful shutdown. Capture measured behavior and compare it with service objectives.

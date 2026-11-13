@@ -1,44 +1,51 @@
-# Express API
+# Relay Express API
 
-## Purpose
+## Service responsibility
 
-This is the canonical Express + Socket.IO service used by the root Compose runtime. It was moved from the original `backend/` directory because that was the source path built by the supplied root `compose.yaml`. The separate original `express-api/` directory is preserved under `archive/express-api-legacy/` and is not the canonical runtime.
+The Express service owns collaboration-oriented HTTP routes and Socket.IO realtime behavior. Its route composition includes authentication, messages, notifications, incidents, AI integration, and internal call-event handling.
 
-## Responsibilities
+## Architecture
 
-The service contains HTTP routes for application, authentication, messaging, incident and AI-related operations; Socket.IO integration; MongoDB/Mongoose models; Redis integration; rate limiting; and health-related endpoints. Exact behavior is defined by the route, middleware, model and test implementations.
+- `src/app.js` composes middleware, health endpoints, metrics, and route modules.
+- `src/bootstrap.js` owns process startup and lifecycle.
+- `src/routes/` defines HTTP route contracts.
+- `src/controllers/` contains request handlers.
+- `src/models/` defines Mongoose models.
+- `src/lib/socket.js` configures Socket.IO and realtime rooms.
+- `src/lib/db.js` and `src/lib/redis.js` manage persistence connections.
+- `src/middleware/` contains authentication and rate limiting.
+- `src/swagger.js` provides API documentation.
 
-## Configuration and dependencies
+## Domain capabilities
 
-The package manifest declares Express, Socket.IO, Mongoose, Redis, authentication/security middleware, RabbitMQ and related integration dependencies. Runtime configuration is supplied through environment variables and `.env.example`. Compose injects MongoDB and Redis service URLs plus an internal Python AI service URL and token.
+- Account registration, login, mobile login/signup, logout, session check, and profile update.
+- User lookup and message history/send/read/update operations.
+- Notification preferences, device-token registration, listing, and read state.
+- Incident and AI route integration.
+- Internal call event intake from the NestJS call domain.
+- Realtime connection and user-room event delivery.
 
-Never expose internal service credentials to browser code. Validate trusted origins, proxy trust, request limits, cookie/session configuration, and authentication/authorization for both HTTP and Socket.IO flows.
+## Authentication contracts
+
+Browser clients use the cookie-based session behavior. Native clients use `POST /api/auth/mobile/login` and `POST /api/auth/mobile/signup` to obtain a bearer token. Protected routes accept the configured cookie or bearer authorization mode. Socket.IO authenticates using browser cookie context or a token supplied in the handshake `auth.token` field.
+
+The native token is stateless and has a configured expiration. Client-side deletion on logout is not equivalent to server-side revocation of a copied token.
+
+## Data and dependencies
+
+MongoDB/Mongoose stores collaboration documents. Redis supports selected cache, rate-limit, and coordination functions. The service integrates with the Python AI API and NestJS call domain through internal endpoints and tokens.
 
 ## Development and tests
 
 ```bash
-cd services/express-api
-npm install
-npm run dev
-npm run test:integration
+pnpm --dir services/express-api dev
+pnpm --dir services/express-api run test:integration
 ```
 
-From the repository root, use `npm run test:express-api`. Integration tests may require running dependencies and environment variables. A passing test suite is evidence only for the scenarios it exercises.
+From the repository root:
 
-## Operational requirements
+```bash
+pnpm test:express-api
+```
 
-- Verify resource-level authorization on every protected HTTP route.
-- Verify socket handshake authentication, room membership and event-level authorization.
-- Bound request bodies, uploads, database operations and external service calls.
-- Test Redis outage behavior and distributed rate-limit semantics.
-- Test AI service timeout, unavailable service, malformed response and internal-token rotation.
-- Keep MongoDB schema/index and retention behavior explicit.
-- Preserve correlation identifiers and redact credentials and sensitive user content from logs.
-
-## Native client contracts
-
-The Expo client uses `POST /api/auth/mobile/login` and `POST /api/auth/mobile/signup`. These routes share the browser handlers' validation and rate limits but return a bearer token and do not set the browser auth cookie. Protected HTTP routes accept either the existing `jwt` cookie or an `Authorization: Bearer` token. Socket.IO accepts the browser cookie or a token in the handshake `auth.token` field.
-
-`GET /api/messages/:id` returns a bounded chronological page (`limit` defaults to 50 and must be 1–100). When older messages exist, `X-Has-More: true` and `X-Next-Cursor` provide a stable cursor based on creation time and ObjectId. Cursor pagination is intentionally shared by the web and native clients. Message responses use `Cache-Control: no-store` because they contain private conversation data.
-
-The native JWT is currently stateless and expires after seven days. Native logout deletes the credential on-device but does not revoke a copied token; do not represent that as server-side revocation. See [Mobile Architecture and Security](../../docs/mobile-architecture.md) for the known limitation and required session-lifecycle roadmap.
+Validate HTTP and Socket.IO authorization separately, including room membership and event-level access.

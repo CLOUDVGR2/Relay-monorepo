@@ -1,44 +1,64 @@
-# Relay — AWS Deployment Architecture
+# Relay AWS Deployment Architecture
 
-> **Status:** Proposed architecture only. No AWS resources have been created by this documentation work.
+## Deployment model
 
-## Architecture diagram
+The repository contains Terraform definitions for selected AWS resources and a Kustomize AWS overlay for Kubernetes workloads. The intended runtime is Amazon EKS with Amazon ECR image distribution, AWS Load Balancer Controller ingress, IAM workload identities, AWS Secrets Manager integration, and S3-compatible recording storage.
+
+## Logical topology
 
 ```mermaid
-flowchart TD
-    U[Users / Browser] -->|HTTPS| ALB[AWS Application Load Balancer]
-    ALB -->|Ingress route /| FE[Frontend Service]
-    FE --> BE[Backend API]
-    FE --> GO[Go API]
-    FE --> NEST[NestJS API]
-    BE --> PY[Python AI Service]
-    BE --> REDIS[(Redis)]
-    BE --> MONGO[(MongoDB)]
-    BE --> PG[(PostgreSQL / pgvector)]
-    GO --> MQ[(RabbitMQ)]
-    WORKER[Go Worker] <--> MQ
-    NEST --> MONGO
-    NEST --> PG
-    PY --> PG
-    ECR[Amazon ECR] -. image pulls .-> EKS[EKS Workloads]
-    EKS --- ALB
-    ACM[AWS Certificate Manager] -. TLS certificate .-> ALB
+flowchart TB
+  CLIENT[Browser / Mobile] --> ALB[Application Load Balancer]
+  ALB --> ING[Ingress]
+  ING --> FE[Frontend]
+  ING --> GW[API Gateway]
+  GW --> EXP[Express API]
+  GW --> NEST[NestJS API]
+  EXP --> M[(MongoDB)]
+  EXP --> R[(Redis)]
+  NEST --> PG[(PostgreSQL)]
+  NEST --> M
+  NEST --> S3[(S3 recording bucket)]
+  PY[Python AI API] --> PG
+  GOAPI[Go Jobs API] --> MQ[(RabbitMQ)]
+  MQ --> GOW[Go Worker]
+  REC[Recording Worker] --> S3
+  REC --> PG
+  ECR[Amazon ECR] -. image pulls .-> EKS[EKS]
+  ESO[External Secrets Operator] --> SM[AWS Secrets Manager]
+  SM -. synchronized secrets .-> EKS
+  IAM[EKS Pod Identity] -. scoped roles .-> EKS
 ```
 
-## Components
+## Infrastructure responsibilities
 
-- **Amazon EKS:** Intended Kubernetes runtime for Relay workloads in the `relay` namespace.
-- **Amazon ECR:** Intended registry for application images.
-- **Application Load Balancer:** Created through the AWS Load Balancer Controller when the required AWS infrastructure and permissions are configured.
-- **AWS Certificate Manager:** Provides the TLS certificate for the HTTPS listener.
-- **Application services:** Web frontend, Express API, Go jobs API, Go jobs worker, NestJS API, and Python AI service. The current Kubernetes overlay does not include the API gateway.
-- **Data and messaging:** MongoDB, PostgreSQL with pgvector, Redis, and RabbitMQ. Production hosting, persistent storage, and backups still require review.
-- **AI inference:** The Python AI service needs an endpoint reachable from EKS. Replace local-only `host.docker.internal` configuration before deployment.
+| AWS capability | Repository implementation |
+|---|---|
+| Container registry | Terraform ECR repositories with scan-on-push and encryption |
+| Recording object store | Optional S3 bucket, public-access block, server-side encryption |
+| Workload identity | IAM roles and EKS Pod Identity associations |
+| Secrets delivery | External Secrets Operator resources and Secrets Manager trust policy |
+| Ingress | AWS overlay ingress and Load Balancer Controller integration |
+| Persistent volumes | AWS overlay storage class and stateful workload resources |
 
-## Important deployment notes
+## Workload topology
 
-The current Ingress manifest routes `/` to the frontend. Confirm and implement the required API routing before assuming the browser can reach each API directly. This diagram illustrates intended service dependencies, not verified Ingress routes or provisioned infrastructure.
+The AWS overlay includes frontend, gateway, Express backend, NestJS API, Go API and worker, Python AI service, multi-agent worker, recording worker, and stateful infrastructure resources. Exact image names, service accounts, resource requests, probes, and environment variables are specified in the overlay manifests.
 
-Before deployment, configure the AWS account, Region, ECR image tags, domain, certificate ARN, secrets, storage, network access, and monitoring. Never commit credentials or secret values.
+## Network and trust boundaries
 
-See [AWS overlay README](../../infrastructure/kubernetes/overlays/aws/README.md) and [AWS deployment checklist](../aws-deployment-checklist.md).
+Public ingress terminates at the configured load balancer and routes to selected services. Internal APIs and worker endpoints should remain cluster-private unless a specific route is intentionally published. Workload identities should be bound to exact namespace/service-account pairs. Database and broker ingress should be restricted to application workloads.
+
+## Deployment workflow
+
+1. Configure Terraform variables and remote state.
+2. Initialize and validate Terraform.
+3. Review a saved plan and cost/security impact.
+4. Provision ECR, IAM, S3, and required EKS integrations.
+5. Build and publish application images.
+6. Configure External Secrets and Kubernetes service accounts.
+7. Apply the AWS Kustomize overlay.
+8. Verify rollout, ingress, storage, and service health.
+9. Run application smoke tests and recovery validation.
+
+The repository defines deployment assets; resource provisioning and production acceptance are performed in the target AWS account.

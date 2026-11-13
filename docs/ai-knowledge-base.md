@@ -1,111 +1,50 @@
-# Relay — Product and Technical Knowledge Base
+# Relay AI and Knowledge Architecture
 
-## 1. Overview
+## Service boundary
 
-Relay is a full-stack application that provides real-time messaging and an AI assistant grounded in a user's available documents.
+The Python AI service is a FastAPI application. It exposes versioned routes for AI status, incident intelligence, conversation analysis, tenant-scoped document workflows, and multi-agent task lifecycle operations. Internal endpoints use bearer authentication. Tenant-scoped operations additionally resolve a Relay user identity to a tenant record.
 
-The repository contains a React frontend, an Express API, Go services, and a Python AI service. The AI service implements retrieval-augmented generation (RAG), allowing answers to be based on ingested documents instead of relying solely on a language model's general knowledge.
+## Retrieval-augmented generation
 
-This document describes the verified local implementation. It is not a claim that every component has been deployed to production.
+The document workflow is composed of distinct stages:
 
-## 2. Application Architecture
+1. **Ingestion** — validate document metadata and content, resolve tenant ownership, and persist the document record.
+2. **Chunking** — split source content into bounded retrieval units while retaining document identity and source metadata.
+3. **Embedding** — produce vectors using the configured embedding implementation.
+4. **Persistence** — store chunk text, metadata, and vector representations in PostgreSQL with pgvector.
+5. **Retrieval** — embed a query and rank candidate chunks within the resolved tenant.
+6. **Context construction** — assemble selected evidence with source references and a bounded context budget.
+7. **Generation** — invoke the configured model provider and produce a response grounded in retrieved content.
+8. **Citation serialization** — return source metadata associated with the retrieved evidence.
 
-### Frontend
+Tenant filtering is performed at the retrieval boundary. A user identity header is not an authorization credential; the service bearer token authenticates the internal caller.
 
-The frontend is a React application built with Vite. The application includes an AI assistant page at `/ai`.
+## Provider abstraction
 
-The AI assistant sends questions to the Express API and displays the returned answer and source citations. It requests five results by default.
+The service declares LiteLLM and LangGraph dependencies and isolates provider selection behind provider/factory modules. This creates a boundary between workflow logic and model-provider configuration. Model name, provider endpoint, credentials, timeout, and output validation are runtime configuration concerns.
 
-### Express API
+## Incident intelligence
 
-The Express API provides the application-facing AI answer endpoint:
+The incident domain persists incident lifecycle state and evidence. Investigation workflows produce structured traces and support explicit approval before execution of remediation actions. The API separates investigate, approve, execute, and recover operations so that proposed actions and authorized execution are distinct steps.
 
-- `POST /api/ai/answer`
+## Conversation analysis
 
-The endpoint requires an authenticated user, validates the question and retrieval count, applies origin checks and rate limiting, and forwards the request to the Python AI service.
+Conversation analysis accepts transcript content and produces structured analysis artifacts such as summaries, decisions, and action items. It should be treated as derived content; the original conversation remains the source record.
 
-The Express API obtains the user identity from the authenticated request rather than trusting a user ID supplied in the question payload.
+## Multi-agent execution
 
-The AI service's internal authentication token is configured on the server and is not intended to be exposed to the browser.
+The multi-agent API persists task records and exposes lifecycle state, progress, results, error codes, and timestamps. A dedicated worker coordinates execution through agent and provider abstractions. Internal lease/worker fields are excluded from the task response model.
 
-### Python AI service
+## Persistence and migrations
 
-The Python AI service is built with FastAPI. Its document API uses the `/v1/documents` route prefix.
+SQLAlchemy async, asyncpg, Alembic, and pgvector support the Python service's relational data layer. Migration files establish schema evolution for tenant mapping, documents, incidents, embeddings, and multi-agent tasks. Migration ordering is part of the service release contract.
 
-The verified document operations are:
+## Security and quality properties
 
-- `POST /v1/documents` — ingest a document.
-- `POST /v1/documents/search` — retrieve relevant document chunks.
-- `POST /v1/documents/answer` — generate an answer with citations.
-- `GET /v1/documents` — list documents for the current tenant.
-- `GET /v1/documents/{document_id}` — retrieve document metadata.
-
-These endpoints require internal Bearer-token authentication and a `X-Relay-User-Id` header. The service resolves that identity to a tenant and scopes document operations to that tenant.
-
-## 3. Document Ingestion
-
-A document contains:
-
-- `title`: a required title of up to 500 characters.
-- `content`: required text of up to 1,000,000 characters.
-- `source_uri`: an optional source reference of up to 2,048 characters.
-
-The ingestion pipeline splits document text into overlapping chunks, generates an embedding for each chunk, and persists the document and its chunks in PostgreSQL.
-
-The current ingestion defaults are:
-
-- Chunk size: 1,200 characters.
-- Chunk overlap: 150 characters.
-- Embedding dimensions: 768.
-
-The implementation uses an Ollama embedding client by default. The database stores document metadata, chunk content, embeddings, and metadata describing chunk positions.
-
-Ingestion is tenant-scoped. Documents should be created through an authenticated application workflow that derives the user identity from the authenticated session.
-
-## 4. Retrieval and Answer Generation
-
-The document search endpoint accepts a query and an optional `top_k` value. The supported range for `top_k` is 1 through 20, with a default of 5.
-
-The retrieval pipeline searches document chunks using vector and full-text search components. Retrieved chunks provide evidence for the answer-generation pipeline.
-
-The answer endpoint accepts:
-
-- `question`: a non-empty question of up to 2,000 characters.
-- `top_k`: the number of retrieval results to request, from 1 through 20.
-
-The response contains an `answer` string and a `citations` array. Citation metadata identifies the source document and retrieved chunk, including its title, document ID, chunk ID, chunk index, and available text offsets.
-
-When available evidence is insufficient, the assistant is designed to abstain rather than present an unsupported answer as established fact.
-
-## 5. Authentication and Tenant Isolation
-
-The Express AI endpoint requires the application's authenticated session.
-
-The Python document API independently checks its internal Bearer token. It also receives the Relay user ID through `X-Relay-User-Id`.
-
-Document listing, retrieval, search, and answering resolve the user's tenant and use tenant-scoped database operations. The internal token must remain server-side and must never be embedded in frontend code, documentation examples containing real credentials, or public source control.
-
-## 6. Local AI Dependencies
-
-The local RAG implementation uses:
-
-- PostgreSQL with pgvector for document and embedding storage.
-- Ollama for local embedding and answer-generation model requests.
-- FastAPI for the Python AI HTTP API.
-- Express as the authenticated application-facing gateway.
-
-The configured embedding vector dimension is 768. The embedding model and any generation model must be configured consistently with the implementation and deployment environment.
-
-## 7. Current Limitations and Verification
-
-The existence of an endpoint does not prove that the complete workflow has been validated in a running environment.
-
-Before relying on an answer, verify that:
-
-1. The intended document was successfully ingested.
-2. Search returns relevant chunks from that document.
-3. The answer includes citations to the retrieved source.
-4. A user cannot retrieve another tenant's documents.
-5. Missing AI dependencies and upstream failures are handled safely.
-
-Production deployment, monitoring, backup and restore procedures, and operational service-level objectives require separate verification.
+- Authenticate internal callers independently from tenant identity.
+- Resolve tenant ownership before querying documents or chunks.
+- Keep retrieval and model context tenant-scoped.
+- Treat document text and model outputs as untrusted.
+- Validate tool calls and structured model outputs.
+- Bound chunk count, retrieval depth, prompt size, token usage, provider concurrency, and workflow timeout.
+- Preserve source references so generated answers can expose evidence.

@@ -1,64 +1,59 @@
-# Relay security threat model
-
-**Status:** engineering baseline; validate against the actual deployment and data classification before production approval.
+# Relay Security Threat Model
 
 ## 1. Security objectives
 
-Relay must preserve confidentiality, integrity, and availability for user identity, conversations, job payloads, uploaded/retrieved documents, model prompts and outputs, and service credentials. Security controls are enforced at service boundaries; private network placement is defense in depth, not authorization.
+Protect identity, conversation content, task and incident records, documents, model context, recordings, service credentials, and deployment control planes across confidentiality, integrity, and availability dimensions.
 
-### Assets and trust boundaries
+## 2. Assets and trust boundaries
 
-| Asset / boundary | Primary risks | Required controls |
+| Boundary | Threats | Security controls |
 |---|---|---|
-| Browser → frontend / gateway | XSS, CSRF, request smuggling, abusive traffic | TLS at ingress, strict origin policy, security headers, rate limits, body/time limits, safe cookies |
-| User → Express / Nest APIs | credential theft, broken object-level authorization, mass assignment | validated input, authn + per-object authz, explicit DTOs, bounded pagination, safe errors |
-| Service → service | token replay, confused deputy, lateral movement | distinct service credentials, least-privilege network policy, audience/purpose validation where supported, rotation |
-| API → MongoDB / PostgreSQL / Redis | injection, overprivileged credentials, data exfiltration | parameterized queries, least-privilege accounts, TLS in production, private network, timeouts, backups |
-| Producer → RabbitMQ → worker | forged, duplicated, oversized, poison messages | authenticated broker access, schema validation, bounded payloads, durable publishing/acks, idempotency, retry limits, DLQ policy |
-| User documents → RAG / model / tools | prompt injection, data leakage, resource exhaustion, unauthorized retrieval | tenant/ACL filtering before retrieval, upload limits, parser isolation, token/context budgets, tool allowlists, output validation |
-| CI → artifact / registry / deployment | leaked secrets, dependency compromise, mutable artifact drift | secret scanning, dependency/image scanning, minimal permissions, immutable digests, provenance and review |
-| Operator → production | accidental destructive change, credential exposure | audited access, just-in-time privilege, tested restore, change review and rollback plan |
+| Browser/mobile to public API | Credential theft, CSRF, XSS, abusive traffic | TLS, origin policy, safe cookies, bearer handling, rate limits, input validation |
+| API to domain data | IDOR, tenant crossover, mass assignment | Authenticated identity, resource authorization, tenant-scoped queries, DTO/schema validation |
+| Gateway to upstream | Spoofed forwarded headers, request smuggling, route exposure | Explicit route allowlist, trusted proxy CIDRs, request IDs, bounded transports |
+| Service to service | Token replay, confused deputy, lateral movement | Dedicated internal tokens, least privilege, private networking, rotation |
+| API to database | Injection, overprivileged credentials, data exfiltration | Parameterized/ORM access, scoped accounts, TLS, private networking, backups |
+| Queue to worker | Forged, duplicated, malformed, poison messages | Broker auth, schema validation, bounded payloads, manual ack, idempotency, DLQ |
+| Documents to RAG/model | Prompt injection, cross-tenant retrieval, data leakage | Tenant filtering before retrieval, parser limits, context budgets, output validation |
+| Recording pipeline | Unauthorized media access, object substitution, retention errors | Consent authorization, scoped object access, signed upload/download workflow, audit metadata |
+| CI/CD to runtime | Secret leakage, dependency compromise, mutable artifact drift | Secret scanning, dependency/image scans, least-privilege credentials, immutable digests |
+| Operator to environment | Destructive changes, credential misuse | Role separation, review, audit, tested recovery, scoped access |
 
-## 2. Adversaries and assumptions
+## 3. Adversary model
 
-Assume hostile anonymous clients, authenticated users attempting cross-user access, compromised dependencies, malicious or malformed documents, compromised upstream providers, duplicate/out-of-order messages, and accidental operator error. Do not assume a queue message is safe because it came from an internal broker. Do not assume model output is safe because it is syntactically valid.
+Assume anonymous hostile clients, authenticated users probing other users' resources, malicious documents, compromised dependencies, malformed or duplicated queue deliveries, untrusted model output, provider outages, and accidental operator actions. Internal network location is not proof of authorization.
 
-Out of scope for a local developer setup: physical host compromise and cloud-account compromise. Production architecture must separately address these with cloud IAM, workload identity, KMS, network segmentation, audit logs, and organization controls.
+## 4. Security invariants
 
-## 3. Mandatory invariants
+1. Derive acting-user identity from verified credentials.
+2. Authorize every user-owned resource operation at the service boundary.
+3. Apply tenant filters before document retrieval and model context assembly.
+4. Authenticate internal service callers independently of tenant identity.
+5. Fail closed when security-critical configuration is missing.
+6. Never log credentials, cookies, authorization headers, or unnecessary private content.
+7. Bound attacker-controlled work across HTTP, uploads, GraphQL, model calls, queues, and workers.
+8. Make replayable side effects idempotent where delivery or client retries can duplicate work.
+9. Validate messages and provider responses as untrusted input.
+10. Grant each runtime only the permissions required for its function.
 
-1. **Authentication is not authorization.** Every operation that reads or mutates a user-owned object must enforce ownership/tenant access at the data access boundary.
-2. **Fail closed.** Missing or malformed security-critical configuration must prevent startup or reject the operation; never fall back to a public wildcard or shared default secret.
-3. **No secret reflection.** Never return or log bearer tokens, cookies, passwords, database URLs, raw provider credentials, or full sensitive prompts.
-4. **Bound attacker-controlled work.** Request body, upload size, query complexity, pagination, concurrency, model tokens, retry count, job duration and response time need explicit caps.
-5. **Validate at every trust boundary.** HTTP, GraphQL, WebSocket events, queue messages, retrieved content, provider responses and environment configuration are all inputs.
-6. **Authorization before retrieval.** Filter document/chunk candidates by tenant and access policy before placing content in a model context. Post-generation filtering is too late.
-7. **Idempotent side effects.** Queue redelivery and client retries must not create duplicate business effects. Persist idempotency decisions across process restarts where the effect requires it.
-8. **Least privilege.** Each runtime identity can access only the data, network destinations, and secrets required for its role.
+## 5. Abuse-case verification
 
-## 4. Abuse-case test matrix
-
-| Abuse case | Expected result | Evidence to retain |
+| Scenario | Expected behavior | Evidence |
 |---|---|---|
-| Missing/invalid/expired credential | 401/403 with no protected data | auth tests and safe response assertions |
-| Valid user requests another user's object | deny without revealing existence when policy requires | object-level authorization tests |
-| Forged `X-Forwarded-*` or request ID | trusted proxy metadata is rebuilt; IDs are validated | gateway integration tests |
-| Oversized JSON/upload/GraphQL query | bounded 4xx response; no process growth | boundary tests and load profile |
-| Malformed, unknown-field, duplicate queue message | reject, quarantine, or safely deduplicate according to contract | worker reliability tests |
-| Broker/provider/database outage | bounded timeout, controlled error, no retry storm | fault-injection test and alert |
-| Prompt injection in retrieved document | no privilege escalation or unauthorized tool invocation | adversarial RAG/tool tests |
-| Secret committed or printed in logs | CI blocks; logs are redacted | secret scanner and log assertions |
-| Dependency/image critical CVE | build/release blocked or documented time-bound exception | scan report and signed exception |
+| Missing/expired credential | Reject protected operation | Authentication tests |
+| User accesses another user's record | Deny access | Object authorization tests |
+| Tenant header references invalid identity | Reject tenant resolution | AI API security tests |
+| Oversized request or upload | Bounded 4xx response | Boundary tests |
+| Duplicate queue delivery | No duplicate business effect | Idempotency tests |
+| Invalid queue payload | Reject or dead-letter | Worker tests |
+| Malicious document instructions | Treat as data, not authority | RAG evaluation suite |
+| Forged forwarded headers | Ignore unless immediate peer is trusted | Gateway proxy tests |
+| Secret missing at startup | Fail validation or reject protected operation | Configuration tests |
 
-## 5. Secrets lifecycle
+## 6. Credential lifecycle
 
-- Use a managed secret store in production; Kubernetes Secret objects require encryption at rest and tightly scoped RBAC.
-- Use separate credentials per environment and service; do not reuse a single broad database or broker account.
-- Rotate credentials on a schedule and immediately after suspected exposure. Validate both new and old credential overlap behavior before rollout.
-- Keep `.env.example` values nonfunctional. Never place actual credentials in examples, fixtures, screenshots or issue reports.
-- Treat frontend `VITE_*` variables as public. Do not inject private API keys into a browser bundle.
-- Record owner, consumers, rotation procedure, expiry and last rotation for every production secret.
+Use unique secrets by environment and service purpose. Provision through an approved secret manager, rotate on schedule and after exposure, restrict read permissions, and audit access. Build-time client variables must never contain server-only credentials.
 
-## 6. Release gate
+## 7. Security review boundary
 
-A release is not security-approved until the team has reviewed the threat model, verified authz boundaries, reviewed scan findings, tested rollback, confirmed TLS/secret-store configuration, and assigned owners/dates to accepted risks. A passing static scan is not proof of exploit resistance.
+A threat model describes expected controls and verification. A production security assessment additionally requires environment-specific IAM, network, TLS, key management, logging, retention, vulnerability, and penetration-test evidence.

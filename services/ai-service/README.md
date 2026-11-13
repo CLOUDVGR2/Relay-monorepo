@@ -1,28 +1,33 @@
-# Python AI Service
+# Relay Python AI Service
 
-## Purpose
+## Responsibility
 
-The Python service exposes FastAPI endpoints for AI-assisted workflows and retrieval-augmented generation (RAG). Its declared dependencies include SQLAlchemy async, Alembic, asyncpg, pgvector, LangGraph, LiteLLM and MCP.
+The Python service is the AI and automation runtime. It exposes FastAPI endpoints for service status, tenant-scoped document intelligence, incident investigation, conversation analysis, and multi-agent task lifecycle operations. It also contains dedicated worker modules for multi-agent execution and call-recording processing.
 
-## Primary engineering concerns
+## Module architecture
 
-- document ingestion and parsing;
-- chunking and embedding generation;
-- vector persistence and retrieval;
-- context assembly and answer generation;
-- model/provider selection and failure handling;
-- migration and index lifecycle;
-- authorization filtering and data isolation.
+| Package | Responsibility |
+|---|---|
+| `app/api/v1/` | Versioned status and service endpoints |
+| `app/rag/` | Ingestion, chunking, embeddings, retrieval, answer generation |
+| `app/agentops/` | Incident workflows, investigation, provider adapters, tools |
+| `app/multi_agent/` | Durable tasks, coordinator, agents, provider factory, worker |
+| `app/recordings/` | Recording repository, storage, transcription, AI client, worker |
+| `app/db/` | Async database sessions, base metadata, SSL configuration |
+| `app/models/` | Tenant, document, incident, and multi-agent persistence models |
+| `app/core/` | Configuration, internal authentication, OpenAPI conventions |
+| `migrations/` | Alembic schema evolution |
+| `tests/` | API, workflow, provider, persistence, security, and worker tests |
 
-The dependency manifest alone does not prove that every workflow is enabled or production-ready. Use the source routes, schemas, migrations and tests as the implementation authority.
+## Data and provider stack
 
-## Configuration
+The dependency manifest includes FastAPI, SQLAlchemy async, asyncpg, Alembic, pgvector, Redis, LangGraph, LiteLLM, and MCP. PostgreSQL is the relational persistence layer; pgvector supports semantic similarity retrieval. Provider configuration is isolated from domain workflow modules.
 
-See `.env.example` and `requirements.txt`. Compose configures PostgreSQL connectivity, an internal service token, provider/model settings, and an optional host Ollama endpoint. Keep provider keys and internal tokens server-side. Do not place them in frontend build variables.
+## Security model
+
+Protected routes require internal bearer authentication. Tenant-aware document, incident, and multi-agent operations additionally require `X-Relay-User-Id`, which resolves a Relay user to a tenant workspace. Tenant filtering is applied before retrieval. The identity header does not replace caller authentication.
 
 ## Development
-
-Create the service virtual environment, install runtime and development requirements, then run tests using the repository's configured pytest settings. The root `npm run test:ai-service` command expects the interpreter at `services/ai-service/.venv/bin/python`.
 
 ```bash
 cd services/ai-service
@@ -30,8 +35,7 @@ python -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest -v
+uvicorn app.main:app --reload
 ```
 
-## Security and quality gates
-
-Enforce authorization before retrieval content enters model context. Treat user files, retrieved text, model responses and tool outputs as untrusted. Bound ingestion size, chunk count, token budgets, provider concurrency and timeouts. Test provider failure, rate limiting, empty retrieval, stale indexes, malformed output, cancellation and migration recovery. Record model, embedding, prompt and index versions needed to reproduce retrieval behavior.
+Apply Alembic migrations using the environment-specific database URL and the repository's migration configuration.

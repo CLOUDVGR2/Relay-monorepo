@@ -1,55 +1,63 @@
 # Relay Platform Overview
 
-## Purpose
-Relay is a multi-service platform that provides API routing, application services, background processing, and AI-powered document question answering.
+## Platform purpose
 
-## Services
-The Go API Gateway routes requests to the Express API, Nest API, Jobs API, and Python AI Service.
+Relay is a collaboration and operational intelligence platform with browser and native clients. It combines synchronous user-facing workflows—identity, conversations, calls, tasks, and notifications—with asynchronous capabilities for job execution, AI analysis, document retrieval, and media processing.
 
-The gateway is published locally at 127.0.0.1:8090.
+The platform is implemented as a service-oriented monorepo. Each runtime has a distinct responsibility and technology boundary, while shared deployment configuration describes how the services are assembled.
 
-The Express API handles application requests and forwards grounded AI answer requests to the Python AI Service.
+## Product domains
 
-The Nest API provides backend application functionality.
+### Collaboration workspace
+- Account registration, login, session-aware navigation, and profile management.
+- User discovery and conversation creation.
+- Message composition, history, read state, and real-time delivery through Socket.IO.
+- Notification preferences, device tokens, and activity inbox workflows.
 
-The Jobs API and Jobs Worker support background job processing.
+### Calls and recording
+- Call session creation, acceptance, decline, termination, and history.
+- Consent-aware media-session authorization.
+- Native audio capture and recording recovery.
+- Upload-session creation, completion, and refresh through the NestJS API.
+- Object storage integration and asynchronous recording transcription/analysis.
 
-## AI Service
-The Python AI Service uses FastAPI to expose document ingestion, document search, and grounded question-answering endpoints.
+### Tasks and asynchronous work
+- User-owned tasks, checklist items, and links through GraphQL operations.
+- Jobs API for validated job submission and owner-scoped status retrieval.
+- RabbitMQ-backed worker execution with Redis status, idempotency, retry, and heartbeat coordination.
 
-POST /v1/documents ingests a document.
-GET /v1/documents lists documents belonging to the current tenant.
-POST /v1/documents/search retrieves relevant document chunks.
-POST /v1/documents/answer generates an answer based on retrieved evidence.
+### AI and operational intelligence
+- Conversation transcript analysis with structured output.
+- Incident creation, investigation, approval, execution, and recovery workflows.
+- Document ingestion, chunking, embedding, semantic search, and grounded answer generation.
+- Durable multi-agent task submission and progress/result retrieval.
 
-Internal document requests use the X-Relay-User-Id header to identify the Relay user and tenant.
+## Runtime composition
 
-## Document Ingestion
-During ingestion, document content is stored and divided into searchable chunks. The system generates embeddings for semantic search and maintains a full-text search representation.
+| Runtime | Role | Primary interface |
+|---|---|---|
+| React web | Browser application and operational workspace | HTTP APIs, GraphQL, Socket.IO |
+| Expo mobile | Native Android/iOS companion | Express HTTP API, Socket.IO, NestJS GraphQL/REST |
+| Go API Gateway | Public HTTP reverse proxy and route policy | HTTP |
+| Express API | Identity, messaging, notifications, incident and AI integration routes | REST, Socket.IO |
+| NestJS API | Conversation, call, task, job, and recording domain operations | GraphQL, REST |
+| Go Jobs API | Job submission, status, and worker health | REST |
+| Go Jobs Worker | Asynchronous queue consumer | RabbitMQ, Redis |
+| Python AI service | AI orchestration, RAG, incident intelligence, multi-agent execution | FastAPI |
+| Recording worker | Recording retrieval, transcription, and analysis | PostgreSQL, object storage, AI API |
 
-Document search combines semantic similarity and PostgreSQL full-text search. Retrieval is scoped to the current tenant.
+## Data and infrastructure
 
-## Grounded Answers and Citations
-The AI Service retrieves evidence before generating a grounded answer. The generated citation identifiers are validated against the chunks actually retrieved.
+- MongoDB stores Express-oriented user, message, and notification documents.
+- PostgreSQL stores relational domain and AI records, including tenant-scoped documents, chunks, incidents, and multi-agent task data.
+- pgvector supports semantic vector retrieval.
+- Redis supports selected cache, rate-limit, coordination, task status, idempotency, and heartbeat use cases.
+- RabbitMQ provides durable asynchronous job transport.
+- RustFS provides S3-compatible object storage in local Compose/Kubernetes environments; AWS deployment assets describe S3 integration.
+- Prometheus, Blackbox Exporter, and Grafana provide metrics collection, probing, and visualization configuration.
 
-Only validated source chunks are returned as citations. If no evidence is available or no valid citations are generated, the service returns an abstention response rather than inventing sources.
+## Architectural model
 
-Citation information can include the document title, source URI, document ID, chunk ID, and supporting content.
+Relay separates user-facing API contracts from internal execution services. Public traffic enters through the gateway route allowlist. Domain services enforce authentication, authorization, validation, and persistence semantics. Workers consume bounded asynchronous workloads and communicate through explicit broker or database contracts. AI operations are isolated behind the Python service and internal authentication.
 
-## Troubleshooting
-When an AI answer contains no citations:
-1. Confirm that document ingestion succeeded.
-2. Confirm that the document appears in the document list.
-3. Confirm that document chunks were created.
-4. Check that the request uses the expected tenant.
-5. Test document search using words from the document.
-6. Inspect the generated citation identifiers if search returns evidence but the answer has no citations.
-
-A successful HTTP response does not by itself prove that documents were indexed or that evidence was retrieved.
-
-## Example Questions
-- Which services does the Relay API Gateway route requests to?
-- Which endpoint generates grounded AI answers?
-- How does the AI Service retrieve relevant document chunks?
-- How does Relay prevent fabricated citations?
-- What should an engineer check when citations are missing?
+See [System Architecture](docs/architecture.md) for service interactions and [Platform Capabilities](docs/platform-capabilities.md) for the implementation inventory.

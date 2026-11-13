@@ -1,7 +1,7 @@
 {
   "name": "relay-monorepo",
   "version": "1.0.0",
-  "description": "Relay polyglot microservices monorepo",
+  "description": "Relay microservices monorepo",
   "scripts": {
     "install:all": "corepack pnpm install",
     "build:all": "pnpm run build:express-api && pnpm run build:nest-api && pnpm run build:web && pnpm run build:jobs-api && pnpm run build:jobs-worker && pnpm run build:api-gateway",

@@ -1,39 +1,39 @@
-# Security Policy
+# Relay Security Policy
 
-## Scope
+## Security scope
 
-Relay includes a browser client, multiple API services, an API gateway, asynchronous job processing, AI/RAG workflows, databases, message transport, container configuration, and Kubernetes manifests. A vulnerability in any of these layers may affect the overall system.
+This policy applies to the Relay source repository, browser and mobile applications, API services, AI workflows, workers, deployment manifests, CI configuration, and supporting infrastructure.
 
-## Reporting a vulnerability
+## Reporting
 
-Do not publish exploitable details, credentials, tokens, personal data, or a proof of concept against a live system in a public issue.
+Report suspected vulnerabilities privately to the repository owner or the designated security contact configured for the project. Include:
+- affected component and version/commit;
+- concise reproduction steps;
+- security impact and required attacker privileges;
+- relevant sanitized logs or request examples;
+- suggested mitigation, if known.
 
-Use the repository hosting platform's private vulnerability-reporting mechanism when available. If no private mechanism is configured, contact the repository maintainers through a private channel and provide:
-- affected service/path and version or commit;
-- impact and plausible attack prerequisites;
-- minimal reproduction steps or a safe proof of concept;
-- logs or screenshots with secrets and personal data removed;
-- any known mitigations.
+Do not publish exploit details, credentials, personal data, or proof-of-concept payloads that expose other users before coordinated review.
 
-Do not include real credentials, customer content, production connection strings, or unredacted tokens in the report.
+## Security architecture
 
-## Response expectations
+Relay applies defense in depth across:
+- authentication at API and realtime boundaries;
+- resource-level and tenant-scoped authorization;
+- schema and payload validation;
+- trusted-origin and reverse-proxy handling;
+- internal bearer authentication for service-to-service APIs;
+- secret separation from source and client bundles;
+- bounded request, model, and worker execution;
+- safe error responses and structured operational telemetry;
+- dependency, container, secret, and infrastructure scanning.
 
-Maintainers should acknowledge receipt, validate the report, establish severity and affected versions, coordinate a fix, and agree on disclosure timing with the reporter. Do not promise a response SLA unless maintainers have explicitly adopted one.
+Private networking is not an authorization mechanism. Every service receiving user or internal data must validate the identity and authority appropriate to its contract.
 
-## Security engineering principles
+## Credential handling
 
-- Enforce authorization at trusted service boundaries.
-- Keep secrets out of source control, browser bundles, logs, and CI output.
-- Use least-privilege credentials and isolate environments.
-- Validate request bodies, files, queue messages, model outputs and tool inputs.
-- Bound resource use and external calls.
-- Test dependency failure, duplicate messages, and authentication/authorization failures.
-- Keep dependencies and base images updated according to risk.
-- Protect AI retrieval with authorization filtering before model context assembly.
-- Treat Kubernetes Secret base64 values as encoded rather than encrypted.
-- Record residual risk and avoid claims of security certification without independent evidence.
+Use unique, high-entropy credentials per environment and per service purpose. Store deployed secrets in a managed secret facility, restrict access by workload identity or equivalent least-privilege policy, and rotate credentials after suspected exposure. Do not include secret values in documentation, issue trackers, screenshots, logs, or build artifacts.
 
 ## Supported versions and disclosure
 
-No formal support window or vulnerability-disclosure SLA is currently asserted by this repository. Maintainers should publish one when release and maintenance ownership are established.
+Security fixes should target the current maintained branch and current release artifacts. Coordinate disclosure timing with the project owner. A remediation is complete only after the code/configuration change, regression coverage, and affected deployment artifacts have been reviewed.

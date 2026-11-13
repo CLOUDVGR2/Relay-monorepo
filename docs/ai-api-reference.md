@@ -1,53 +1,66 @@
-# Relay AI and Document API Reference
+# Relay API and AI Service Reference
 
-## Public Express API
+## Public gateway surface
 
-### `POST /api/ai/answer`
-Requires an authenticated Relay session and a trusted browser origin. The route applies AI answer rate limiting and forwards the request to the Python AI service.
+The Go gateway currently registers these route families:
 
-Request fields:
-- `question`: non-empty string, maximum 2,000 characters.
-- `top_k`: integer from 1 through 20; the frontend currently requests 5.
+| Method | Path | Destination |
+|---|---|---|
+| Any proxied method | `/api`, `/api/*` | Express API |
+| Any proxied method | `/socket.io/*` | Express Socket.IO |
+| Any proxied method | `/graphql`, `/graphql/*` | NestJS GraphQL |
+| Any proxied method | `/jobs`, `/jobs/*` | NestJS jobs controller |
+| Any proxied method | `/calls`, `/calls/*` | NestJS recording/call HTTP controller |
+| GET | `/healthz` | Gateway liveness |
+| GET | `/readyz` | Gateway dependency readiness |
+| GET | `/gateway/openapi.json` | Gateway OpenAPI |
+| GET | `/gateway/docs` | Gateway Swagger UI |
 
-Successful response fields:
-- `answer`: string.
-- `citations`: array of citation objects.
+NestJS additionally serves `/docs` and `/health` through its registered gateway routes. The gateway does not publish the Go Jobs API's internal routes or the Python service's `/v1` API as general public routes.
 
-The Express route validates the upstream response. Invalid upstream response data is treated as a bad gateway. Upstream timeouts can produce HTTP 504; temporary upstream failures can produce HTTP 502 or 503. Invalid input maps to HTTP 400, and rate limiting can return HTTP 429.
+## Express API
 
-### `POST /api/ai/documents`
-Requires an authenticated Relay session and a trusted browser origin. It applies a dedicated document-ingestion rate limiter.
+Express route families include:
+- `/api/auth` — signup, login, mobile signup/login, logout, session check, profile update;
+- `/api/messages` — user lookup, message history, send, read, and update operations;
+- `/api/notifications` — device token, preferences, list, and read state;
+- `/api/incidents` — incident workflow integration;
+- `/api/ai` — answer, documents, search, runs, and multi-agent task facade;
+- `/internal` — internal call-event integration.
 
-Request fields:
-- `title`: trimmed, non-empty string, maximum 500 characters.
-- `content`: non-empty string, maximum 1,000,000 characters.
-- `source_uri`: optional string, maximum 2,048 characters.
+The exact method, middleware, and request schema are defined by route modules and Swagger output.
 
-A successful upstream response must contain string fields `id` and `title`. Ingestion requests have a 120-second upstream timeout. Do not expose the internal Python service token to the browser.
+## NestJS API
 
-## Python Internal Document API
+GraphQL resolvers provide:
+- conversation list, paginated messages, create/hide/update conversation, participant management, and message creation;
+- task create/list/update, checklist item operations, and task-link operations;
+- call create/accept/decline/end, call history/session, summary generation, and history deletion.
 
-The Python document router uses prefix `/v1/documents`. Its routes require a valid internal Bearer token and use `X-Relay-User-Id` to scope operations to a tenant.
+REST controllers provide health/readiness, jobs operations, call recording upload lifecycle, and internal media-session authorization.
 
-### `POST /v1/documents`
-Creates and ingests a document. Returns HTTP 201 with document metadata when successful.
+## Python AI API
 
-### `POST /v1/documents/search`
-Request: `query` (non-empty, maximum 2,000 characters) and `top_k` (1–20, default 5). Returns the query and retrieved chunk results, including source metadata and scores.
+The FastAPI application exposes:
+- `GET /healthz`, `GET /readyz`, and `GET /v1/ai/status`;
+- `/v1/incidents` lifecycle routes for incident creation, investigation, approval, execution, recovery, and detail;
+- conversation analysis route under the conversation-analysis router;
+- `/v1/documents` ingestion, search, answer, list, and detail operations;
+- `/v1/multi-agent/tasks` create, list, and detail operations;
+- protected `/internal/metrics`.
 
-### `POST /v1/documents/answer`
-Request: `question` (non-empty, maximum 2,000 characters) and `top_k` (1–20, default 5). Returns `answer` and `citations`.
+Protected AI endpoints require an internal bearer token. Tenant-scoped document, incident, and task operations also require `X-Relay-User-Id`. Health/readiness are intentionally unauthenticated for orchestration.
 
-Citation fields include `chunk_id`, `document_id`, `title`, `source_uri`, `chunk_index`, `start`, and `end`.
+## Go Jobs API
 
-### `GET /v1/documents`
-Lists documents for the supplied user/tenant. Supports `limit` from 1 to 100 (default 20) and non-negative `offset` (default 0).
+The Jobs API exposes liveness, readiness, RabbitMQ health, worker health, and internal job submission/status routes. Internal job operations require `Authorization: Bearer <INTERNAL_API_TOKEN>`. Its route contract and request limits are documented in `services/jobs-api/README.md`.
 
-### `GET /v1/documents/{document_id}`
-Returns document metadata only when the document belongs to the supplied tenant; otherwise returns 404.
+## API documentation endpoints
 
-## Security Notes
-- The Python document router applies internal-token authentication to its routes.
-- The internal token is configured server-side and must not be sent to the frontend.
-- The Express API passes the authenticated Relay user ID to Python.
-- Keep upstream error messages safe; do not return credentials or secrets.
+- Gateway OpenAPI: `/gateway/openapi.json`
+- Gateway Swagger UI: `/gateway/docs`
+- NestJS Swagger UI: `/docs`
+- Express Swagger UI: `/api-docs`
+- Python OpenAPI: `/openapi.json`, with `/docs` and `/redoc`
+
+Use the live OpenAPI/GraphQL schema from the target build when implementing clients; this document is a navigation map, not a replacement for generated schemas.

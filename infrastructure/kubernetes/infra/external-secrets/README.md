@@ -1,52 +1,27 @@
-# External Secrets Operator
+# External Secrets Operator Integration
 
-ESO is installed separately from the Relay application overlay. The chart
-version is pinned to `2.15.0`; the controller ServiceAccount must remain
-`external-secrets` in namespace `external-secrets` to match the Terraform
-EKS Pod Identity association.
+## Purpose
 
-## Install or upgrade ESO
+The Kubernetes External Secrets Operator resources connect a Kubernetes namespace to AWS Secrets Manager through a SecretStore and workload identity. The operator synchronizes selected remote secret values into Kubernetes Secret objects consumed by Relay workloads.
 
-From the repository root, after the EKS cluster and Pod Identity association
-exist:
+## Resource set
 
-```bash
-helm repo add external-secrets https://charts.external-secrets.io
-helm repo update external-secrets
+- `external-secrets.yaml` — operator installation/configuration resources.
+- `secret-store.yaml` — provider and authentication configuration.
+- `helm-values.yaml` — Helm values for operator deployment.
+- `kustomization.yaml` — resource composition.
 
-helm upgrade --install external-secrets external-secrets/external-secrets \
-  --version 2.15.0 \
-  --namespace external-secrets \
-  --create-namespace \
-  --values infrastructure/kubernetes/infra/external-secrets/helm-values.yaml \
-  --wait
-```
+## Identity model
 
-## Synchronize Relay secrets
+The AWS role trust policy is scoped to the External Secrets service account, namespace, EKS cluster, and source account. The role policy should grant only `secretsmanager:GetSecretValue` and `secretsmanager:DescribeSecret` for the Relay secret namespace.
 
-After the ESO CRDs and controller are ready, apply the namespaced resources:
+## Integration sequence
 
-```bash
-kubectl apply -k infrastructure/kubernetes/infra/external-secrets
-```
+1. Install the Pod Identity Agent and External Secrets Operator.
+2. Create the matching EKS Pod Identity association.
+3. Configure the approved Secrets Manager secret naming scheme.
+4. Apply the SecretStore and ExternalSecret resources.
+5. Verify synchronization status without printing secret values.
+6. Confirm consuming workloads reference the expected Kubernetes Secret keys.
 
-The SecretStore uses the controller's default AWS SDK credential chain.
-It intentionally does not configure static credentials or a separate
-ServiceAccount JWT authentication reference; AWS access is expected through
-the EKS Pod Identity association.
-
-The seven Secrets Manager values must be JSON objects whose properties match
-the `remoteRef.property` entries in `external-secrets.yaml`. Their names use
-the `relay/dev/` prefix and must match the Terraform IAM policy's secret ARN
-patterns.
-
-Verify synchronization before deploying or restarting application workloads:
-
-```bash
-kubectl get secretstore -n relay
-kubectl get externalsecrets -n relay
-kubectl get secrets -n relay
-```
-
-Do not commit secret values to this repository. Confirm shared token and
-database credential consistency across the consuming services before rollout.
+Secret values are never committed to this repository. Review IAM scope, secret refresh behavior, and rotation impact before deployment.

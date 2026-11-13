@@ -1,80 +1,54 @@
 # Relay API Gateway
 
-The Relay API Gateway is the platform's Go HTTP entry point. It routes selected HTTP and Socket.IO traffic to Express and NestJS services.
+## Responsibility
 
-## API documentation
+The Go API Gateway is the public application-routing layer for selected Relay HTTP and Socket.IO paths. It uses the standard Go HTTP server and reverse-proxy packages. It does not duplicate downstream authentication, authorization, validation, or business response contracts.
 
-| Resource | URL |
+## Route policy
+
+| Path | Upstream |
 |---|---|
-| Gateway Swagger UI | http://localhost:8090/gateway/docs |
-| Gateway OpenAPI JSON | http://localhost:8090/gateway/openapi.json |
-| NestJS Swagger UI | http://localhost:8090/docs |
+| `/api`, `/api/` | Express API |
+| `/socket.io/` | Express API |
+| `/jobs`, `/jobs/` | NestJS API |
+| `/graphql`, `/graphql/` | NestJS API |
+| `/calls`, `/calls/` | NestJS API |
+| `/docs`, `/docs/` | NestJS API |
+| `/health`, `/health/` | NestJS API |
+| `/healthz`, `/readyz` | Gateway-local |
+| `/gateway/docs`, `/gateway/openapi.json` | Gateway-local |
 
-The Gateway OpenAPI specification documents Gateway-owned endpoints, not every downstream endpoint. Swagger UI assets load from the pinned unpkg CDN.
+Configured Go Jobs API and Python upstream URLs are not public route registrations in the current route table.
 
-## Routing
+## Request processing
 
-| Public path | Upstream |
-|---|---|
-| `/api`, `/api/` | Express |
-| `/socket.io/` | Express |
-| `/jobs`, `/jobs/` | NestJS |
-| `/graphql` | NestJS |
-| `/calls`, `/calls/` | NestJS |
-| `/docs`, `/docs/` | NestJS |
-| `/health`, `/health/` | NestJS |
-| `/healthz` | Gateway |
-| `/readyz` | Gateway |
-| `/gateway/docs` | Gateway |
-| `/gateway/openapi.json` | Gateway |
+The gateway:
+- validates an incoming request ID or generates a new one;
+- propagates the ID to downstream requests and response headers;
+- sets `X-Content-Type-Options`, `X-Frame-Options`, and `Referrer-Policy`;
+- derives forwarding metadata from the direct peer and configured trusted proxy CIDRs;
+- uses bounded connection pools and response-header timeouts;
+- preserves connection hijacking for WebSocket upgrades;
+- returns a normalized `502` response when an upstream cannot be reached;
+- records route-level metrics with low-cardinality labels.
 
-Go Jobs API and Python AI origins are configurable but do not have public routes unless explicitly registered.
+## Health and observability
+
+- `GET /healthz` is process liveness.
+- `GET /readyz` probes Express and NestJS readiness endpoints.
+- `GET /gateway/openapi.json` and `/gateway/docs` expose gateway-owned documentation.
+- Gateway metrics are exposed through the metrics handler configured by the service runtime.
 
 ## Configuration
 
-| Variable | Purpose |
-|---|---|
-| `GATEWAY_PORT` | Listener port; default 8090 |
-| `GATEWAY_EXPRESS_URL` | Express upstream |
-| `GATEWAY_NEST_URL` | NestJS upstream |
-| `GATEWAY_GO_URL` | Go Jobs API upstream |
-| `GATEWAY_PYTHON_URL` | Python AI upstream |
-| `GATEWAY_TRUSTED_PROXY_CIDRS` | Optional comma-separated CIDRs of trusted immediate reverse proxies; unset by default |
+The configuration parser in `config.go` defines upstream URLs, listener port, and trusted proxy CIDRs. Runtime defaults and validation in source are authoritative. Keep upstream DNS names internal to the target network.
 
-Upstream values must be HTTP(S) origins without credentials, query strings, fragments, or arbitrary path prefixes.
+## Development
 
-## Request and response behavior
+```bash
+go test ./...
+go vet ./...
+go build ./...
+```
 
-The Gateway preserves downstream authentication and authorization. Proxying does not make routes public.
-
-The Gateway assigns or validates request IDs, applies security headers, and returns JSON `502 Bad Gateway` responses for upstream failures.
-
-### Trusted reverse proxies
-
-`GATEWAY_TRUSTED_PROXY_CIDRS` is an optional comma-separated allowlist of IP ranges for immediate upstream proxies. It defaults to empty, so forwarded client IP and protocol headers are not trusted by default.
-
-When the immediate peer belongs to a configured range, the Gateway may use the rightmost valid IP in `X-Forwarded-For` and a valid `X-Forwarded-Proto` value. Otherwise, it derives client IP and protocol from the connection itself. IPv4-mapped IPv6 CIDRs are normalized to IPv4; mapped prefixes broader than `/96` are rejected.
-
-Only configure this variable after verifying that the network boundary prevents untrusted clients from reaching the Gateway through those trusted proxy addresses. For AWS ALB deployments, verify the actual ALB-to-pod security-group and network restrictions first. Do not guess ALB subnet CIDRs or trust broad private address ranges. Leave the variable unset until that boundary is established.
-
-Express uses a 75-second response-header timeout. NestJS uses a 10-second response-header timeout. Socket.IO has no response-header timeout to support long-lived connections.
-
-## Health semantics
-
-`GET /healthz` verifies that the Gateway process responds. It does not contact upstream services.
-
-`GET /readyz` currently returns `{"status":"ready"}` without checking dependency availability. It does not prove that upstream services or workflows are healthy.
-
-## Development and validation
-
-The project uses Go 1.27.4.
-
-Run from this directory:
-
-    go test ./...
-    go vet ./...
-    go build ./...
-
-## Release requirements
-
-Test every published route, including methods, query strings, body forwarding, response headers, timeout behavior, upstream failures, and WebSocket behavior where required. Update the README and OpenAPI specification when routes or operational behavior change.
+Run from `services/api-gateway/`.

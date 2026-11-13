@@ -1,29 +1,37 @@
-# Relay Security and Operations Notes
+# Security and Operational Architecture
 
-## Authentication
-Express AI routes apply `protectRoute`. Authentication routes include signup, login, logout, profile update, and authenticated session checking. Signup, login, and profile-update routes use dedicated rate limiters.
+## Identity domains
 
-## Trusted Origins and Request Limits
-AI answer and document-ingestion routes apply a trusted-origin check. The Express API validates document title, content, and optional source URI before forwarding ingestion requests. The ingestion route has a dedicated rate limiter and a 120-second upstream timeout.
+Relay uses several distinct identity mechanisms:
+- browser authentication through server-managed cookie/session behavior;
+- native authentication through bearer JWTs;
+- Socket.IO authentication through the connection handshake token;
+- internal service authentication through dedicated bearer tokens;
+- tenant context in the Python AI API through the Relay user identity header.
 
-## Internal Python Authentication
-The Python document router requires an internal Bearer token. Token comparison uses a constant-time comparison function. If the expected token is not configured, requests are rejected. The token must remain server-side and must never be embedded in frontend code or logs.
+These identities are not interchangeable. Internal service authentication establishes the caller; tenant context scopes the requested user's data; resource authorization determines whether the operation is permitted.
 
-## Tenant Scoping
-Python document creation, search, answer, list, and detail operations obtain a tenant using `X-Relay-User-Id`. List and detail queries filter by tenant ID. A document not found within the requested tenant returns 404.
+## Request boundary controls
 
-This is the implemented access pattern visible in the document routes. Live cross-user access prevention should also be verified through automated API security tests.
+The Express API configures Helmet, explicit trusted origins, bounded JSON parsing, authentication middleware, and metrics. The Go gateway normalizes request IDs, applies response security headers, restricts forwarded metadata to trusted proxy peers, and forwards only registered paths. NestJS uses HTTP and GraphQL guards, DTO validation, centralized error handling, and throttling components.
 
-## Safe Error Handling
-The Express AI proxy returns controlled errors for invalid requests, rate limits, upstream failures, malformed upstream responses, and timeouts. Do not expose internal tokens, cookies, or provider credentials in client-facing errors.
+## Data protection
 
-## Operational Verification
-Before treating Relay as production-ready, verify:
-- Cross-tenant access tests for search, answer, list, and document detail.
-- Authentication and origin-policy behavior.
-- Rate-limit behavior under repeated requests.
-- Ollama and Python AI failure handling.
-- Database backup and restore procedures.
-- Monitoring, alerting, deployment configuration, and recovery procedures.
+- Keep credentials in environment-specific secret stores.
+- Use least-privilege database and object-storage identities.
+- Scope user-owned records by verified user identity.
+- Scope RAG retrieval by tenant before model context assembly.
+- Protect internal endpoints with service authentication.
+- Apply retention and deletion policies to recordings, messages, documents, and derived artifacts.
 
-Do not claim an uptime SLA, production SLO, backup guarantee, or compliance certification unless it is established by an authoritative operational source.
+## Operational signals
+
+- Liveness answers whether a process is responding.
+- Readiness answers whether the instance can accept its assigned work.
+- Dependency checks describe a specific set of upstream dependencies.
+- Queue depth, oldest message age, worker heartbeat, and completion rate describe asynchronous progress.
+- Synthetic user journeys measure behavior across multiple services.
+
+## Secure operations
+
+Use immutable image digests for controlled release promotion, review IAM permissions, audit secret access, validate restore procedures, and preserve deployment manifests alongside the application source. Operational commands should be scoped to the target namespace and environment.

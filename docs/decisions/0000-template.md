@@ -1,27 +1,29 @@
-# ADR NNNN: Short decision title
+# ADR NNNN: Decision title
 
-- **Status:** Proposed | Accepted | Superseded | Rejected
+- **Status:** Proposed / Accepted / Superseded
 - **Date:** YYYY-MM-DD
-- **Owners:** Team or role responsible for the decision
-- **Related:** Links to issues, designs, contracts, or other ADRs
+- **Owners:** Service or architecture owners
 
 ## Context
 
-Describe the problem, constraints, and forces that make a decision necessary. Separate verified facts from assumptions.
+Describe the system forces, constraints, consumers, and requirements that shape the decision.
 
 ## Decision
 
-State the decision in precise, testable terms.
+State the selected approach precisely, including service ownership, interface boundaries, data semantics, and operational behavior.
 
-## Alternatives considered
+## Alternatives
 
-- **Option A:** Benefits, costs, and reason for rejection or selection.
-- **Option B:** Benefits, costs, and reason for rejection or selection.
+List viable alternatives and the technical trade-offs considered.
 
 ## Consequences
 
-Describe benefits, trade-offs, failure modes, operational costs, and follow-up work.
+Describe positive outcomes, costs, migration implications, security considerations, and operational responsibilities.
 
 ## Verification
 
-List the code paths, configuration, tests, or operational evidence needed to establish conformance. Use “not verified” until that evidence exists.
+Link tests, schemas, manifests, or runtime evidence that demonstrate the decision is implemented as intended.
+
+## Related decisions
+
+Link related or superseding ADRs.
