@@ -4,8 +4,6 @@
 
 This repository is intended to be read as an engineering system, not as a single application directory. Service boundaries, public routes, internal integrations, ownership rules, and deployment artifacts are documented below and in the technical dossier.
 
-> **Evidence standard.** This documentation describes what is present in the supplied source tree. A component, test, Docker image, Kustomize overlay, or Terraform module is evidence of implementation or deployment preparation—not proof of a live production rollout, a measured service-level objective, external certification, or operation at a stated user scale. No such claims are made here.
-
 ## Executive overview
 
 Relay combines synchronous, user-facing workflows with asynchronous execution:
