@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.document import Document, DocumentChunk
+from app.models.tenant import Tenant
 from app.rag.embeddings import get_embedding_client
 
 
@@ -33,6 +34,7 @@ class RetrievedChunk:
     start: int | None
     end: int | None
     score: float
+    uploaded_by_id: str | None = None
 
 
 def _has_substantial_overlap(left: RetrievedChunk, right: RetrievedChunk) -> bool:
@@ -58,14 +60,14 @@ def _has_substantial_overlap(left: RetrievedChunk, right: RetrievedChunk) -> boo
 async def retrieve_chunks(
     db: AsyncSession,
     *,
-    tenant_id: uuid.UUID,
+    tenant_id: uuid.UUID | None,
     query: str,
     top_k: int = 5,
     embedder: QueryEmbeddingProvider | None = None,
 ) -> list[RetrievedChunk]:
     """Combine vector similarity and full-text rankings with reciprocal rank fusion."""
-    if not isinstance(tenant_id, uuid.UUID):
-        raise TypeError("tenant_id must be a UUID")
+    if tenant_id is not None and not isinstance(tenant_id, uuid.UUID):
+        raise TypeError("tenant_id must be a UUID or None")
 
     if not isinstance(query, str) or not query.strip():
         raise ValueError("query must not be empty")
@@ -105,18 +107,21 @@ async def retrieve_chunks(
 
     distance = DocumentChunk.embedding.cosine_distance(query_vector)
 
+    semantic_filters = [DocumentChunk.embedding.is_not(None)]
+    if tenant_id is not None:
+        semantic_filters.append(DocumentChunk.tenant_id == tenant_id)
+
     semantic_query = (
         select(
             DocumentChunk,
             Document.title,
             Document.source_uri,
             distance.label("distance"),
+            Tenant.relay_user_id,
         )
         .join(Document, document_join)
-        .where(
-            DocumentChunk.tenant_id == tenant_id,
-            DocumentChunk.embedding.is_not(None),
-        )
+        .join(Tenant, Tenant.id == Document.tenant_id)
+        .where(*semantic_filters)
         .order_by(distance.asc())
         .limit(candidate_k)
     )
@@ -127,18 +132,21 @@ async def retrieve_chunks(
         text_query,
     )
 
+    keyword_filters = [DocumentChunk.search_vector.op("@@")(text_query)]
+    if tenant_id is not None:
+        keyword_filters.append(DocumentChunk.tenant_id == tenant_id)
+
     keyword_query = (
         select(
             DocumentChunk,
             Document.title,
             Document.source_uri,
             text_rank.label("text_rank"),
+            Tenant.relay_user_id,
         )
         .join(Document, document_join)
-        .where(
-            DocumentChunk.tenant_id == tenant_id,
-            DocumentChunk.search_vector.op("@@")(text_query),
-        )
+        .join(Tenant, Tenant.id == Document.tenant_id)
+        .where(*keyword_filters)
         .order_by(text_rank.desc())
         .limit(candidate_k)
     )
@@ -151,12 +159,14 @@ async def retrieve_chunks(
     for rows in (semantic_rows, keyword_rows):
         for rank, row in enumerate(rows, start=1):
             chunk, title, source_uri = row[0], row[1], row[2]
+            uploaded_by_id = row[4] if len(row) > 4 else None
             item = fused.setdefault(
                 chunk.id,
                 {
                     "chunk": chunk,
                     "title": title,
                     "source_uri": source_uri,
+                    "uploaded_by_id": uploaded_by_id,
                     "score": 0.0,
                 },
             )
@@ -181,6 +191,7 @@ async def retrieve_chunks(
                 start=start if isinstance(start, int) else None,
                 end=end if isinstance(end, int) else None,
                 score=item["score"],
+                uploaded_by_id=item["uploaded_by_id"],
             )
         )
 

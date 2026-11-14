@@ -56,45 +56,6 @@ function formatRunDate(value) {
   }).format(date);
 }
 
-function cleanCitationText(value) {
-  return typeof value === "string"
-    ? value.trim().replace(/\\([*#`_{}()!>.-])/g, "$1")
-    : "";
-}
-
-function getCitationPreview(value) {
-  const text = cleanCitationText(value);
-
-  if (text.length <= 420) return text;
-
-  let start = 0;
-  const opening = text.slice(0, 100);
-  const firstBoundary = (() => { for (let j = 0; j < opening.length - 1; j++) { if ('.!?'.includes(opening[j]) && opening[j + 1] === ' ') return j; } return -1; })();
-
-  // Skip a short, incomplete opening fragment when the text starts mid-sentence.
-  if (
-    firstBoundary >= 0 &&
-    firstBoundary < 80 &&
-    /^[a-z]/.test(text)
-  ) {
-    start = firstBoundary + 1;
-    while (/\s/.test(text[start] || "")) start += 1;
-  }
-
-  const preview = text.slice(start, start + 420);
-  const boundary = Math.max(
-    preview.lastIndexOf(". "),
-    preview.lastIndexOf("? "),
-    preview.lastIndexOf("! "),
-    preview.lastIndexOf("\n"),
-  );
-
-  if (boundary >= 260) return preview.slice(0, boundary + 1).trimEnd();
-
-  const wordBoundary = preview.lastIndexOf(" ");
-  return preview.slice(0, wordBoundary >= 300 ? wordBoundary : 420).trimEnd();
-}
-
 function runStatusClasses(status) {
   switch (String(status || "").toLowerCase()) {
     case "succeeded":
@@ -307,9 +268,7 @@ export default function OperationalWorkspacePage({ workspace }) {
   const [knowledgeError, setKnowledgeError] = useState("");
   const [knowledgeQuery, setKnowledgeQuery] = useState("");
   const [knowledgeSearching, setKnowledgeSearching] = useState(false);
-  const [knowledgeResults, setKnowledgeResults] = useState([]);
   const [knowledgeSearchError, setKnowledgeSearchError] = useState("");
-  const [knowledgeSearched, setKnowledgeSearched] = useState(false);
   const [knowledgeAnswer, setKnowledgeAnswer] = useState(null);
 
   const [documentTitle, setDocumentTitle] = useState("");
@@ -406,6 +365,7 @@ export default function OperationalWorkspacePage({ workspace }) {
   const searchKnowledge = async (event) => {
     event.preventDefault();
     const query = knowledgeQuery.trim();
+
     if (!query) {
       setKnowledgeSearchError("Enter a question or search phrase.");
       return;
@@ -413,61 +373,34 @@ export default function OperationalWorkspacePage({ workspace }) {
 
     setKnowledgeSearching(true);
     setKnowledgeSearchError("");
-    setKnowledgeSearched(true);
     setKnowledgeAnswer(null);
-    setKnowledgeResults([]);
 
-    const [retrievalOutcome, answerOutcome] = await Promise.allSettled([
-      fetchWorkspaceJson(`${EXPRESS_API_URL}/ai/documents/search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, top_k: 5 }),
-      }),
-      fetchWorkspaceJson(`${EXPRESS_API_URL}/ai/answer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: query, top_k: 5 }),
-      }),
-    ]);
-
-    const errors = [];
-
-    if (retrievalOutcome.status === "fulfilled") {
-      const payload = retrievalOutcome.value;
-      if (
-        typeof payload?.query !== "string" ||
-        !Array.isArray(payload?.results)
-      ) {
-        errors.push("Passage retrieval returned an unexpected response.");
-      } else {
-        setKnowledgeResults(payload.results);
-      }
-    } else {
-      setKnowledgeResults([]);
-      errors.push(
-        `Passage retrieval failed: ${retrievalOutcome.reason?.message || "Unknown retrieval error."}`,
+    try {
+      const payload = await fetchWorkspaceJson(
+        `${EXPRESS_API_URL}/ai/answer`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: query, top_k: 5 }),
+        },
       );
-    }
 
-    if (answerOutcome.status === "fulfilled") {
-      const payload = answerOutcome.value;
       if (
         typeof payload?.answer !== "string" ||
         !Array.isArray(payload?.citations)
       ) {
-        errors.push("Grounded answer generation returned an unexpected response.");
-      } else {
-        setKnowledgeAnswer(payload);
+        throw new Error("Grounded answer generation returned an unexpected response.");
       }
-    } else {
-      setKnowledgeAnswer(null);
-      errors.push(
-        `Grounded answer generation failed: ${answerOutcome.reason?.message || "Unknown answer error."}`,
-      );
-    }
 
-    setKnowledgeSearchError(errors.join(" "));
-    setKnowledgeSearching(false);
+      setKnowledgeAnswer(payload);
+    } catch (error) {
+      setKnowledgeAnswer(null);
+      setKnowledgeSearchError(
+        `Grounded answer generation failed: ${error.message || "Unknown answer error."}`,
+      );
+    } finally {
+      setKnowledgeSearching(false);
+    }
   };
 
 
@@ -794,12 +727,6 @@ export default function OperationalWorkspacePage({ workspace }) {
               <p role="alert" className="mt-3 text-sm text-error">{knowledgeSearchError}</p>
             )}
 
-            {knowledgeSearched && !knowledgeSearching && !knowledgeSearchError && !knowledgeAnswer && knowledgeResults.length === 0 && (
-              <p className="mt-5 rounded-xl border border-dashed border-base-300 p-5 text-center text-sm text-base-content/65">
-                No matching passages were returned for this query.
-              </p>
-            )}
-
             {knowledgeAnswer && (
               <section
                 aria-live="polite"
@@ -822,101 +749,18 @@ export default function OperationalWorkspacePage({ workspace }) {
                     "The answer service returned no answer."}
                 </p>
 
-                <div className="mt-5 border-t border-base-300/70 pt-4">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-base-content/70">
-                    Supporting sources ({knowledgeAnswer.citations.length})
-                  </h4>
-
-                  {knowledgeAnswer.citations.length === 0 ? (
-                    <p className="mt-2 text-sm text-base-content/60">
-                      No supporting citations were returned. Verify the answer against the source documents.
+                {Array.isArray(knowledgeAnswer.uploaded_by) &&
+                  knowledgeAnswer.uploaded_by.length > 0 && (
+                    <p className="mt-3 text-xs text-base-content/60">
+                      Uploaded by {knowledgeAnswer.uploaded_by.join(", ")}
                     </p>
-                  ) : (
-                    <ol className="mt-3 space-y-2">
-                      {knowledgeAnswer.citations.map((citation, index) => (
-                        <li
-                          key={citation.chunk_id || `${citation.document_id || "source"}-${index}`}
-                          className="rounded-xl border border-base-300/80 bg-base-100 p-3"
-                        >
-                          <p className="text-sm font-semibold">
-                            {citation.title || `Source ${index + 1}`}
-                          </p>
-                          {typeof citation.content === "string" &&
-                            citation.content.trim() && (
-                              <>
-                                <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-base-content/80">
-                                  {cleanCitationText(citation.content).length > 420
-                                    ? `${getCitationPreview(citation.content)}…`
-                                    : cleanCitationText(citation.content)}
-                                </p>
-                                {cleanCitationText(citation.content).length > 420 && (
-                                  <details className="mt-2">
-                                    <summary className="cursor-pointer text-xs font-semibold text-primary hover:underline">
-                                      Show full passage
-                                    </summary>
-                                    <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-base-content/80">
-                                      {cleanCitationText(citation.content)}
-                                    </p>
-                                  </details>
-                                )}
-                              </>
-                            )}
-                          <p className="mt-1 text-xs text-base-content/60">
-                            Passage {Number.isInteger(citation.chunk_index)
-                              ? citation.chunk_index + 1
-                              : "—"}
-                          </p>
-                          {citation.source_uri && (
-                            /^https?:\/\//i.test(citation.source_uri) ? (
-                              <a
-                                href={citation.source_uri}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="mt-2 inline-block break-all text-xs font-semibold text-primary hover:underline"
-                              >
-                                Open original source ↗
-                              </a>
-                            ) : (
-                              <p className="mt-2 break-all text-xs text-base-content/60">
-                                Source: {citation.source_uri}
-                              </p>
-                            )
-                          )}
-                        </li>
-                      ))}
-                    </ol>
                   )}
-                </div>
+
+
               </section>
             )}
 
-            {knowledgeResults.length > 0 && (
-              <div className="mt-5 space-y-3">
-                {knowledgeResults.map((result, index) => (
-                  <article
-                    key={result.chunk_id || `${result.document_id || "result"}-${index}`}
-                    className="rounded-xl border border-base-300/80 p-4"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <h3 className="text-sm font-semibold">{result.title || "Retrieved passage"}</h3>
-                      {Number.isFinite(Number(result.score)) && (
-                        <span className="text-xs text-base-content/60">
-                          RRF ranking score: {Number(result.score).toFixed(4)}
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-base-content/80">
-                      {result.content || "No passage text provided."}
-                    </p>
-                    {result.source_uri && (
-                      <p className="mt-3 break-all text-xs text-base-content/55">
-                        Source: {result.source_uri}
-                      </p>
-                    )}
-                  </article>
-                ))}
-              </div>
-            )}
+
           </div>
         </section>
       )}

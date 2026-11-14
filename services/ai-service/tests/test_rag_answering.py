@@ -132,3 +132,92 @@ async def test_empty_question_is_rejected():
             question="   ",
             generator=FakeGenerator("{}"),
         )
+
+
+def make_workshop_hours_chunk():
+    content = """Cedar Grove Community Workshop
+
+Opening hours:
+Monday–Thursday: 9 AM–7 PM
+Friday: 9 AM–5 PM
+Saturday: 10 AM–2 PM
+Sunday: Closed
+
+Classes and fees:
+Beginner woodworking: Tuesdays at 6 PM; $35 per session.
+Introductory pottery: Wednesdays at 5:30 PM; $40 per session.
+Bicycle maintenance: Saturdays at 11 AM; $25 per session.
+Digital photography: Thursdays at 6 PM; $30 per session.
+"""
+    return RetrievedChunk(
+        chunk_id=uuid.uuid4(),
+        document_id=uuid.uuid4(),
+        title="RELAY-RAG-TEST-001",
+        source_uri=None,
+        content=content,
+        chunk_index=0,
+        start=0,
+        end=len(content),
+        score=0.03,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("question", "expected"),
+    [
+        (
+            "What time does Cedar Grove close on Thursday?",
+            "The closing time on Thursday is 7 PM.",
+        ),
+        (
+            "What time does Cedar Grove close on Saturday?",
+            "The closing time on Saturday is 2 PM.",
+        ),
+    ],
+)
+async def test_closing_time_uses_matching_weekday_hours(
+    monkeypatch, question, expected
+):
+    chunk = make_workshop_hours_chunk()
+    generator = FakeGenerator(json.dumps({
+        "answer": "Incorrect model answer: 2 PM.",
+        "cited_chunk_ids": [str(chunk.chunk_id)],
+    }))
+    monkeypatch.setattr(
+        answering, "retrieve_chunks", AsyncMock(return_value=[chunk])
+    )
+
+    result = await answer_question(
+        object(),
+        tenant_id=uuid.uuid4(),
+        question=question,
+        generator=generator,
+    )
+
+    assert result.answer == expected
+    assert result.citations == [chunk]
+    assert generator.system_prompt is None
+
+
+@pytest.mark.asyncio
+async def test_class_time_is_not_treated_as_business_closing_time(monkeypatch):
+    chunk = make_workshop_hours_chunk()
+    generator = FakeGenerator(json.dumps({
+        "answer": "Digital photography starts Thursday at 6 PM.",
+        "cited_chunk_ids": [str(chunk.chunk_id)],
+    }))
+    monkeypatch.setattr(
+        answering, "retrieve_chunks", AsyncMock(return_value=[chunk])
+    )
+
+    result = await answer_question(
+        object(),
+        tenant_id=uuid.uuid4(),
+        question="What time is digital photography on Thursday?",
+        generator=generator,
+    )
+
+    assert result.answer == "Digital photography starts Thursday at 6 PM."
+    assert result.citations == [chunk]
+    assert generator.system_prompt is not None

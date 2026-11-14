@@ -61,6 +61,7 @@ class RetrievedChunkResponse(BaseModel):
     source_uri: str | None
     content: str
     chunk_index: int
+    uploaded_by_id: str | None = None
     start: int | None
     end: int | None
     score: float
@@ -93,6 +94,7 @@ class AnswerCitationResponse(BaseModel):
     chunk_index: int
     start: int | None
     end: int | None
+    uploaded_by_id: str | None = None
 
 
 class DocumentAnswerResponse(BaseModel):

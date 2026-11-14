@@ -1,5 +1,6 @@
-"""Authenticated, tenant-scoped document API for RAG."""
+"""Authenticated RAG API with owner-scoped management and shared retrieval."""
 
+import re
 import uuid
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Security
@@ -24,6 +25,12 @@ from app.schemas.documents import (
     DocumentSearchRequest,
     DocumentSearchResponse,
 )
+
+
+def _validate_relay_user_id(relay_user_id: str) -> None:
+    """Require an authenticated Relay identity without resolving a private tenant."""
+    if not re.fullmatch(r"[0-9a-fA-F]{24}", relay_user_id):
+        raise HTTPException(status_code=400, detail="Invalid Relay user identity")
 
 
 router = APIRouter(
@@ -74,7 +81,7 @@ async def create_document(
     responses={502: error_response("Document search or embedding failed.")},
 
     summary='Search Documents',
-    description='Performs semantic retrieval across documents belonging to the resolved tenant. The query is embedded and used to retrieve the most relevant content chunks. top_k defaults to 5 and must be between 1 and 20. Results include relevance scores and source document metadata.',
+    description='Performs semantic retrieval across documents uploaded by authenticated Relay users. The query is embedded and used to retrieve the most relevant content chunks. top_k defaults to 5 and must be between 1 and 20. Results include relevance scores and source document metadata.',
     response_description='The search query and its ranked matching document chunks.',
 )
 async def search_documents(
@@ -82,12 +89,12 @@ async def search_documents(
     relay_user_id: str = Header(alias="X-Relay-User-Id"),
     db: AsyncSession = Depends(get_db),
 ):
-    tenant = await _get_or_create_tenant(db, relay_user_id)
+    _validate_relay_user_id(relay_user_id)
 
     try:
         results = await retrieve_chunks(
             db,
-            tenant_id=tenant.id,
+            tenant_id=None,
             query=payload.query,
             top_k=payload.top_k,
         )
@@ -109,7 +116,7 @@ async def search_documents(
     responses={502: error_response("Grounded answer generation failed.")},
 
     summary='Answer Using Documents',
-    description="Generates an answer to a question using relevant content retrieved from the resolved tenant's document collection. The response includes citations identifying the source documents and content chunks. top_k defaults to 5 and must be between 1 and 20.",
+    description="Generates an answer using relevant content retrieved across authenticated Relay users' document collections. The response includes citations identifying the source documents and content chunks. top_k defaults to 5 and must be between 1 and 20.",
     response_description='The generated answer and its supporting document citations.',
 )
 async def answer_documents(
@@ -117,12 +124,12 @@ async def answer_documents(
     relay_user_id: str = Header(alias="X-Relay-User-Id"),
     db: AsyncSession = Depends(get_db),
 ):
-    tenant = await _get_or_create_tenant(db, relay_user_id)
+    _validate_relay_user_id(relay_user_id)
 
     try:
         result = await answer_question(
             db,
-            tenant_id=tenant.id,
+            tenant_id=None,
             question=payload.question,
             top_k=payload.top_k,
         )
@@ -140,6 +147,7 @@ async def answer_documents(
             content=chunk.content,
             source_uri=chunk.source_uri,
             chunk_index=chunk.chunk_index,
+            uploaded_by_id=chunk.uploaded_by_id,
             start=chunk.start,
             end=chunk.end,
         )

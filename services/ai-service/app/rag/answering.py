@@ -1,5 +1,6 @@
 """Grounded answers using tenant-scoped RAG evidence."""
 import json
+import re
 import uuid
 from dataclasses import dataclass
 from typing import Protocol
@@ -42,6 +43,13 @@ Answer the user's question using only facts supported by the supplied evidence.
 Do not invent facts, sources, identifiers, or citations.
 If the evidence is insufficient, say so clearly.
 
+Time and category disambiguation:
+- Identify the kind of time the question asks for, such as operating hours, closing time, class start time, or event time.
+- When asked when a business or service closes, use evidence explicitly describing its operating hours or closing time.
+- Never substitute a class, lesson, event, or appointment time for a business's closing time, even if it occurs on the same day.
+- Match the requested weekday to the exact weekday or weekday range in the operating-hours evidence.
+- Preserve the meaning and label associated with each time in the source.
+
 When answering questions about Relay API routes, distinguish the API layers:
 - Public browser-facing routes are Express routes, such as /api/ai/answer
   and /api/ai/documents.
@@ -66,10 +74,206 @@ cited_chunk_ids array.
 """
 
 
+
+
+_WEEKDAY_NAMES = (
+    "Monday", "Tuesday", "Wednesday", "Thursday",
+    "Friday", "Saturday", "Sunday",
+)
+
+_WEEKDAY_ALIASES = {
+    "mon": 0, "monday": 0, "mondays": 0,
+    "tue": 1, "tues": 1, "tuesday": 1, "tuesdays": 1,
+    "wed": 2, "wednesday": 2, "wednesdays": 2,
+    "thu": 3, "thur": 3, "thurs": 3, "thursday": 3, "thursdays": 3,
+    "fri": 4, "friday": 4, "fridays": 4,
+    "sat": 5, "saturday": 5, "saturdays": 5,
+    "sun": 6, "sunday": 6, "sundays": 6,
+}
+
+_WEEKDAY_PATTERN = re.compile(
+    r"\b(mondays|monday|mon|tuesdays|tuesday|tues|tue|"
+    r"wednesdays|wednesday|wed|thursdays|thursday|thurs|thur|thu|"
+    r"fridays|friday|fri|saturdays|saturday|sat|"
+    r"sundays|sunday|sun)\b",
+    re.IGNORECASE,
+)
+
+_HOURS_HEADER = re.compile(
+    r"^\s*(?:(?:opening|operating|business)\s+)?hours\s*:?\s*(.*?)\s*$",
+    re.IGNORECASE,
+)
+
+_CLOCK_PATTERN = re.compile(
+    r"(?<![\w:])"
+    r"(?:(?:1[0-2]|0?[1-9])(?::[0-5]\d)?\s*[ap]\.?m\.?"
+    r"|(?:[01]?\d|2[0-3]):[0-5]\d)"
+    r"(?!\w)",
+    re.IGNORECASE,
+)
+
+
+def _weekday_numbers(value: str) -> set[int]:
+    lowered = value.lower()
+
+    if re.search(r"\bweekdays?\b", lowered):
+        return {0, 1, 2, 3, 4}
+    if re.search(r"\bweekends?\b", lowered):
+        return {5, 6}
+
+    matches = [
+        _WEEKDAY_ALIASES[match.group(1).lower()]
+        for match in _WEEKDAY_PATTERN.finditer(value)
+    ]
+
+    days = list(dict.fromkeys(matches))
+    if not days:
+        return set()
+
+    is_range = bool(
+        re.search(r"[-–—]|\bto\b|\bthrough\b|\bthru\b", lowered)
+    )
+
+    if len(days) == 2 and is_range:
+        start, end = days
+        result = {start}
+        while start != end:
+            start = (start + 1) % 7
+            result.add(start)
+        return result
+
+    return set(days)
+
+
+def _operating_hours_lines(content: str):
+    active = False
+    found_schedule = False
+
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        header = _HOURS_HEADER.match(line)
+
+        if header:
+            active = True
+            inline = header.group(1).strip()
+            if inline:
+                found_schedule = bool(
+                    _weekday_numbers(inline.partition(":")[0])
+                )
+                yield inline
+            continue
+
+        if not active:
+            continue
+
+        if not line:
+            if found_schedule:
+                break
+            continue
+
+        if ":" not in line:
+            if found_schedule:
+                break
+            continue
+
+        day_label = line.partition(":")[0]
+        if _weekday_numbers(day_label):
+            found_schedule = True
+            yield line
+        elif found_schedule:
+            break
+
+
+def _closing_value_for_day(content: str, target_day: int) -> str | None:
+    for line in _operating_hours_lines(content):
+        day_label, separator, hours = line.partition(":")
+        if not separator or target_day not in _weekday_numbers(day_label):
+            continue
+
+        if re.match(r"^\s*closed\b", hours, re.IGNORECASE):
+            return "closed"
+
+        times = list(_CLOCK_PATTERN.finditer(hours))
+        if len(times) >= 2:
+            return re.sub(
+                r"\s+",
+                " ",
+                times[-1].group().upper().replace(".", ""),
+            )
+
+    return None
+
+
+def _answer_from_operating_hours(
+    question: str,
+    chunks: list[RetrievedChunk],
+) -> GroundedAnswer | None:
+    """Answer weekday closing-time questions from explicit hours evidence."""
+    if not re.search(
+        r"\b(?:close|closes|closing|closed)\b",
+        question,
+        re.IGNORECASE,
+    ):
+        return None
+
+    requested_days = _weekday_numbers(question)
+    if len(requested_days) != 1:
+        return None
+
+    target_day = next(iter(requested_days))
+    matches_by_document = {}
+
+    for chunk in chunks:
+        closing_value = _closing_value_for_day(chunk.content, target_day)
+        if closing_value is not None:
+            matches_by_document.setdefault(chunk.document_id, []).append(
+                (chunk, closing_value)
+            )
+
+    if not matches_by_document:
+        return None
+
+    # Use the highest-ranked matching document. Do not mix schedules from
+    # unrelated documents uploaded by different users.
+    best_document_id = max(
+        matches_by_document,
+        key=lambda document_id: max(
+            item[0].score for item in matches_by_document[document_id]
+        ),
+    )
+
+    matches = sorted(
+        matches_by_document[best_document_id],
+        key=lambda item: -item[0].score,
+    )
+    values = {value for _, value in matches}
+
+    citations = list({
+        chunk.chunk_id: chunk for chunk, _ in matches
+    }.values())
+
+    weekday = _WEEKDAY_NAMES[target_day]
+
+    if len(values) > 1:
+        answer = (
+            f"The available operating-hours entries give conflicting "
+            f"closing times for {weekday}, so I can't confirm a single time."
+        )
+    else:
+        value = next(iter(values))
+        answer = (
+            f"The business is closed on {weekday}."
+            if value == "closed"
+            else f"The closing time on {weekday} is {value}."
+        )
+
+    return GroundedAnswer(answer=answer, citations=citations)
+
+
 async def answer_question(
     db: AsyncSession,
     *,
-    tenant_id: uuid.UUID,
+    tenant_id: uuid.UUID | None,
     question: str,
     top_k: int = 5,
     embedder: EmbeddingProvider | None = None,
@@ -89,6 +293,12 @@ async def answer_question(
 
     if not chunks:
         return GroundedAnswer(answer=ABSTENTION_MESSAGE, citations=[])
+
+    deterministic_answer = _answer_from_operating_hours(
+        question, chunks
+    )
+    if deterministic_answer is not None:
+        return deterministic_answer
 
     evidence = [
         {

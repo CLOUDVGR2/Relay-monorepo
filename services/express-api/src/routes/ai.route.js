@@ -2,6 +2,7 @@
 
 import express from "express";
 import AiExecution from "../models/ai-execution.model.js";
+import User from "../models/user.model.js";
 
 import { protectRoute } from "../middleware/auth.middleware.js";
 import {
@@ -130,9 +131,61 @@ async function requestGroundedAnswer(req, question, topK) {
       throw error;
     }
 
+    const uploaderIds = [...new Set(
+      data.citations
+        .map((citation) => citation?.uploaded_by_id)
+        .filter(
+          (id) =>
+            typeof id === "string" &&
+            /^[0-9a-f]{24}$/i.test(id),
+        ),
+    )];
+
+    let uploadedBy = [];
+
+    if (uploaderIds.length > 0) {
+      try {
+        const uploaderUsers = await User.find({
+          _id: { $in: uploaderIds },
+        })
+          .select("_id fullName")
+          .lean()
+          .exec();
+
+        const namesById = new Map(
+          uploaderUsers.map((user) => [
+            String(user._id),
+            user.fullName,
+          ]),
+        );
+
+        uploadedBy = [...new Set(
+          uploaderIds
+            .map((id) => namesById.get(id))
+            .filter(
+              (name) =>
+                typeof name === "string" && name.trim().length > 0,
+            ),
+        )];
+      } catch (lookupError) {
+        // Attribution must not make an otherwise valid grounded answer fail.
+        console.warn(
+          "[ai-answer] Uploader attribution lookup failed:",
+          lookupError.message,
+        );
+      }
+    }
+
+    const publicCitations = data.citations.map((citation) => {
+      const publicCitation = { ...citation };
+      delete publicCitation.uploaded_by_id;
+      return publicCitation;
+    });
+
     return {
       answer: data.answer,
-      citations: data.citations,
+      uploaded_by: uploadedBy,
+      citations: publicCitations,
     };
   } catch (error) {
     if (error.status) {
@@ -675,6 +728,7 @@ router.get("/documents", trustedOrigin, async (req, res) => {
  *         description: Knowledge search timed out
  */
 router.post("/documents/search", trustedOrigin, async (req, res) => {
+
   const query =
     typeof req.body?.query === "string" ? req.body.query.trim() : "";
   const topK = req.body?.top_k === undefined ? 5 : req.body.top_k;
