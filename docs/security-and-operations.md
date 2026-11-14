@@ -1,37 +1,86 @@
 # Security and Operational Architecture
 
-## Identity domains
+## 1. Identity domains
 
-Relay uses several distinct identity mechanisms:
-- browser authentication through server-managed cookie/session behavior;
-- native authentication through bearer JWTs;
-- Socket.IO authentication through the connection handshake token;
-- internal service authentication through dedicated bearer tokens;
-- tenant context in the Python AI API through the Relay user identity header.
+Relay separates user identity from service identity.
 
-These identities are not interchangeable. Internal service authentication establishes the caller; tenant context scopes the requested user's data; resource authorization determines whether the operation is permitted.
+- Express loads the authenticated Relay account from MongoDB and attaches selected identity fields to the request.
+- Native clients use the bearer-token mode; browser clients use the configured cookie/session behavior.
+- NestJS HTTP and GraphQL guards validate authenticated user context.
+- Python service routes require an internal bearer token. Tenant context is carried separately as `X-Relay-User-Id`.
+- Go Jobs API internal job operations require an internal bearer token.
 
-## Request boundary controls
+A valid internal token proves that the caller is an authorized service principal under the configured shared-secret model; it does not prove that the Relay user referenced in the request is allowed to access every resource. Resource ownership predicates remain necessary.
 
-The Express API configures Helmet, explicit trusted origins, bounded JSON parsing, authentication middleware, and metrics. The Go gateway normalizes request IDs, applies response security headers, restricts forwarded metadata to trusted proxy peers, and forwards only registered paths. NestJS uses HTTP and GraphQL guards, DTO validation, centralized error handling, and throttling components.
+## 2. Request boundary controls
 
-## Data protection
+### Gateway
 
-- Keep credentials in environment-specific secret stores.
-- Use least-privilege database and object-storage identities.
-- Scope user-owned records by verified user identity.
-- Scope RAG retrieval by tenant before model context assembly.
-- Protect internal endpoints with service authentication.
-- Apply retention and deletion policies to recordings, messages, documents, and derived artifacts.
+- Explicit route allowlist to Express and NestJS.
+- Request ID validation/generation and downstream propagation.
+- Security response headers.
+- Trusted proxy CIDR parsing before using forwarded client/protocol metadata.
+- Bounded transport behavior and upstream timeouts.
+- Normalized upstream error handling.
 
-## Operational signals
+### Express
 
-- Liveness answers whether a process is responding.
-- Readiness answers whether the instance can accept its assigned work.
-- Dependency checks describe a specific set of upstream dependencies.
-- Queue depth, oldest message age, worker heartbeat, and completion rate describe asynchronous progress.
-- Synthetic user journeys measure behavior across multiple services.
+- Helmet security headers.
+- Credentialed CORS with configured origin allowlist.
+- Cookie parsing and protected route middleware.
+- Default 1 MiB JSON body parsing with larger bounded parsing only for designated image routes.
+- Authentication and route-specific rate limiting.
+- Request metrics without raw URL/user data collection.
 
-## Secure operations
+### NestJS
 
-Use immutable image digests for controlled release promotion, review IAM permissions, audit secret access, validate restore procedures, and preserve deployment manifests alongside the application source. Operational commands should be scoped to the target namespace and environment.
+- Environment validation and fail-fast configuration checks.
+- Helmet and credentialed CORS.
+- Cookie parsing, HTTP/GraphQL guards, request context and timing.
+- Global exception normalization.
+- DTO/schema input validation and service-call response validation.
+
+### Python AI
+
+- Internal bearer dependency on protected API routers.
+- Pydantic request schemas and bounds.
+- Relay identity validation before tenant resolution.
+- Model response JSON and citation-ID validation.
+- Process-local metrics protected by internal bearer authentication.
+
+## 3. Data protection
+
+MongoDB, PostgreSQL, Redis, RabbitMQ and object storage carry different classes of data. Production deployment must define encryption in transit/at rest, key ownership, backup encryption, secret rotation, retention, access logging and deletion semantics. The source repository does not establish the settings of a live managed service.
+
+## 4. Shared Knowledge Base risk
+
+The current RAG product behavior allows search and answer retrieval across tenant IDs. Document ingestion, list and direct fetch remain user-tenant scoped, but this does not create document confidentiality. An authenticated user can receive excerpts from another user's indexed upload through answer/search. Uploader attribution does not restrict access.
+
+Before use with data that must be isolated, introduce an explicit visibility policy and enforce it in both vector and keyword retrieval queries. Add negative tests for unauthorized retrieval and ensure citations/exports cannot bypass the policy.
+
+## 5. Operational signals
+
+Health endpoints, metrics and worker heartbeats are distinct:
+
+- process liveness asks whether a process responds;
+- readiness asks whether required dependencies allow it to accept work;
+- dependency probes check a specific service;
+- worker heartbeat checks whether background processing is active;
+- synthetic journeys validate user-visible workflows.
+
+A passing readiness endpoint is not proof of model-provider availability, queue progress, object storage health or a complete recording workflow unless those dependencies are explicitly included in that endpoint.
+
+## 6. Secure operations
+
+- Keep internal services on private networks.
+- Use environment-specific tokens and least-privilege IAM/object-store policies.
+- Verify trusted proxy CIDRs and CORS origins for each deployment.
+- Review public Gateway and NGINX routes before exposure.
+- Rotate secrets and maintain a break-glass process.
+- Retain audit/security signals without storing unnecessary personal content.
+- Test authorization for REST, GraphQL, Socket.IO, background job ownership and AI tenant operations.
+- Keep backup/restore and incident procedures accessible to authorized responders.
+
+## 7. Evidence limitations
+
+A middleware, manifest or policy file does not by itself prove deployment enforcement. Record the target cluster/account, active configuration, network policy, secret binding, runtime identity, scan report and test result when asserting control effectiveness.

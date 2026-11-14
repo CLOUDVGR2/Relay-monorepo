@@ -1,47 +1,65 @@
 # Relay NestJS Domain API
 
-## Service responsibility
+**Runtime:** Node.js / NestJS / TypeScript
+**Persistence:** PostgreSQL through Prisma, plus integration with Mongo-backed identity and Redis coordination
+**Interfaces:** REST, GraphQL, authenticated internal/service routes.
 
-The NestJS API owns GraphQL conversation, task, and call operations plus REST endpoints for jobs, health, media-session authorization, and recording upload lifecycle. It is a separate domain service from the Express collaboration API.
+## 1. Domain ownership
 
-## Module map
+The NestJS API owns collaboration domain operations that benefit from module boundaries, GraphQL composition, relational consistency, and lifecycle orchestration. It is distinct from the Express API, which owns the established Express/Socket.IO collaboration routes.
 
-- `auth/` — JWT validation, HTTP and GraphQL guards, current-user context.
-- `conversations/` — conversation, message, task, call, media authorization, and recording upload domains.
-- `jobs/` — authenticated facade over the Go Jobs API.
-- `ai/` — AI service integration.
-- `prisma/` — Prisma client lifecycle.
-- `health/` — liveness/readiness endpoints.
-- `common/` — request context, timing, error filtering, DTOs, and guards.
-- `observability/` — Prometheus metrics.
-- `config/` — environment validation.
+| Module area | Responsibility |
+|---|---|
+| `auth/` | token validation, HTTP/GraphQL guards, current-user context |
+| `conversations/` | conversation, messages, participants, tasks, calls, recording lifecycle domains |
+| `jobs/` | authenticated facade to the internal Go Jobs API |
+| `ai/` | authenticated AI answer controller/service integration |
+| `health/` | process health and readiness endpoints |
+| `prisma/` | Prisma client lifecycle and database access |
 
-## GraphQL domains
+The actual module graph and route decorators are the source of truth when a route is added or moved.
 
-Conversation operations include listing, paginated message retrieval, conversation creation and hiding, metadata updates, participant management, and message creation.
+## 2. GraphQL and REST
 
-Task operations include task creation/listing/update, checklist item lifecycle, and task-link lifecycle.
+GraphQL resolvers expose conversation, paginated message, conversation mutation/participant, task, checklist, and task-link operations. REST controllers expose health, jobs facade, call/recording operations, and AI integration as implemented in the controller modules.
 
-Call operations include create, accept, decline, end, call history/session retrieval, summary generation, and call-history deletion.
+The Go Gateway maps `/graphql`, `/jobs`, and `/calls` to NestJS. It does not expose every Nest internal route by default. Route decorators and Gateway allowlist must be changed together when public routing changes.
 
-Resolvers use authenticated GraphQL guards and derive the acting user from the verified request context.
+## 3. Authentication and authorization
 
-## REST domains
+HTTP and GraphQL guards validate the user credential and establish a current-user context. Domain queries and mutations must scope data to the authenticated participant/owner. Internal routes use separate service-to-service authentication and should not be exposed through public ingress without a deliberate review.
 
-Controllers provide application health, readiness, job submission/status, call recording upload creation/completion/refresh, and internal media-session authorization. Recording completion validates server-side upload state and metadata before finalizing the durable recording record.
+The Nest AI endpoint is authenticated and delegates to Python using the internal service credential and trusted Relay user identity. The Python service remains the RAG/AI execution boundary.
 
-## Persistence and integrations
+## 4. Persistence
 
-The service uses PostgreSQL through Prisma for relational records and MongoDB/Mongoose for selected document-oriented records. Redis provides selected coordination. Integrations include the Go Jobs API, Python AI API, Express internal call-event endpoint, and S3-compatible recording storage.
+Prisma schema and migrations describe conversations, messages, participants, tasks/checklists/activity/links, call sessions/participants, recording state/uploads/tracks, transcripts, summaries, and processing jobs. Review schema relations and migration compatibility before changing data ownership or deletion semantics.
 
-## Development and verification
+## 5. Calls and recording lifecycle
+
+The call domain includes lifecycle transitions, participant recording consent, server-side media-session authorization, recording upload creation/refresh/completion, recording track state, and downstream transcript/summary processing. A successful upload request is not equal to a completed processing result. Preserve lifecycle transitions and idempotency when retrying.
+
+See [ADR 0002](../../docs/decisions/0002-call-recording-transcription-and-summaries.md) and [data architecture](../../docs/data-architecture.md).
+
+## 6. Jobs facade
+
+The Nest jobs module presents authenticated user-facing job operations while the internal Go Jobs API handles broker submission/status and the Go worker performs background execution. Do not expose raw broker or internal Jobs API credentials to clients.
+
+## 7. AI controller
+
+The AI module provides an authenticated answer endpoint that delegates to the Python AI service. The endpoint returns an answer and evidence citations, plus uploader display attribution from the Express-backed response path where applicable. Keep answer grounding, identity propagation, and citation validation server-side.
+
+## 8. Local development and tests
 
 ```bash
-pnpm --dir services/nest-api start:dev
-pnpm --dir services/nest-api build
-pnpm --dir services/nest-api test
-pnpm --dir services/nest-api test:e2e
-pnpm --dir services/nest-api lint
+pnpm --filter @relay/nest-api run start:dev
+pnpm --filter @relay/nest-api run test
+pnpm --filter @relay/nest-api run test:e2e
+pnpm --filter @relay/nest-api run build
 ```
 
-Run focused tests for resolver authorization, call state transitions, recording upload idempotency, storage behavior, configuration validation, and health semantics.
+The service requires PostgreSQL, configured authentication/integration secrets, and other dependencies shown in its `.env.example` and Compose service. Use Prisma migration commands defined by the package scripts; inspect `schema.prisma` and migration history before running destructive actions.
+
+## 9. Operational priorities
+
+Monitor GraphQL operation latency/errors, REST route latency, Prisma pool/database health, auth failures, media-session authorization, upload completion, recording processing, AI provider timeout, and Go Jobs API dependency health. Use low-cardinality operation names and do not log tokens or full transcript/media payloads.

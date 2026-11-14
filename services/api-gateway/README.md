@@ -1,54 +1,71 @@
 # Relay API Gateway
 
-## Responsibility
+**Runtime:** Go
+**Responsibility:** public HTTP reverse proxy, WebSocket pass-through, edge transport policy, request correlation, health, and gateway metrics.
 
-The Go API Gateway is the public application-routing layer for selected Relay HTTP and Socket.IO paths. It uses the standard Go HTTP server and reverse-proxy packages. It does not duplicate downstream authentication, authorization, validation, or business response contracts.
+## 1. Position in the architecture
 
-## Route policy
+The Gateway is the single configured edge router for selected Relay paths. It owns routing and transport controls; downstream services continue to own authentication, authorization, domain validation, persistence, and response semantics. A URL configured for an upstream does not imply that the upstream is publicly routable.
 
-| Path | Upstream |
-|---|---|
-| `/api`, `/api/` | Express API |
-| `/socket.io/` | Express API |
-| `/jobs`, `/jobs/` | NestJS API |
-| `/graphql`, `/graphql/` | NestJS API |
-| `/calls`, `/calls/` | NestJS API |
-| `/docs`, `/docs/` | NestJS API |
-| `/health`, `/health/` | NestJS API |
-| `/healthz`, `/readyz` | Gateway-local |
-| `/gateway/docs`, `/gateway/openapi.json` | Gateway-local |
+## 2. Public route allowlist
 
-Configured Go Jobs API and Python upstream URLs are not public route registrations in the current route table.
+| Incoming path | Upstream / behavior | Notes |
+|---|---|---|
+| `/api`, `/api/` | Express API | collaboration, auth, AI adapter, and other Express-mounted routes |
+| `/socket.io/` | Express API | WebSocket/polling transport; upgrade headers preserved |
+| `/jobs`, `/jobs/` | NestJS API | user-facing Nest facade, not the raw Go Jobs API |
+| `/graphql`, `/graphql/` | NestJS API | GraphQL endpoint |
+| `/calls`, `/calls/` | NestJS API | call and recording domain routes |
+| `/docs`, `/docs/` | NestJS API | API docs proxy where enabled |
+| `/health`, `/health/` | NestJS API | health route mapping |
+| `/healthz` | Gateway local | process liveness |
+| `/readyz` | Gateway local | checks configured Express and Nest readiness |
+| `/gateway/docs`, `/gateway/openapi.json` | Gateway local | gateway documentation/spec endpoints |
 
-## Request processing
+The exact allowlist is defined in `services/api-gateway` source and is the source of truth. The current Gateway environment includes Go Jobs and Python AI upstream URLs for internal topology, but the public route table does not expose arbitrary `/v1/*` Python paths or the raw Jobs API. NGINX's local diagnostic mappings are a separate frontend proxy configuration and should not be confused with public Gateway routes.
 
-The gateway:
-- validates an incoming request ID or generates a new one;
-- propagates the ID to downstream requests and response headers;
-- sets `X-Content-Type-Options`, `X-Frame-Options`, and `Referrer-Policy`;
-- derives forwarding metadata from the direct peer and configured trusted proxy CIDRs;
-- uses bounded connection pools and response-header timeouts;
-- preserves connection hijacking for WebSocket upgrades;
-- returns a normalized `502` response when an upstream cannot be reached;
-- records route-level metrics with low-cardinality labels.
+## 3. Request processing
 
-## Health and observability
+The Gateway loads configuration, constructs upstream reverse proxies, handles approved route prefixes, forwards required request metadata, supports WebSocket upgrades, and exposes metrics/health endpoints. Configuration includes upstream URLs, listener/metrics ports, trusted proxy CIDRs, and transport/request limits. Review `config.go`, `server.go`, `metrics.go`, and associated tests when changing behavior.
 
-- `GET /healthz` is process liveness.
-- `GET /readyz` probes Express and NestJS readiness endpoints.
-- `GET /gateway/openapi.json` and `/gateway/docs` expose gateway-owned documentation.
-- Gateway metrics are exposed through the metrics handler configured by the service runtime.
+## 4. Trust and security
 
-## Configuration
+- Trust forwarded IP/protocol metadata only from configured trusted proxy ranges.
+- Do not treat client-supplied `X-Forwarded-For` or identity headers as authenticated proof.
+- Preserve downstream Authorization/cookie semantics without logging secrets.
+- Keep route matching exact and allowlist-based; do not add a catch-all proxy.
+- Bound dial, response-header, idle-connection, and proxy timeouts.
+- Apply security headers and request IDs consistently.
+- Keep metrics labels low-cardinality.
 
-The configuration parser in `config.go` defines upstream URLs, listener port, and trusted proxy CIDRs. Runtime defaults and validation in source are authoritative. Keep upstream DNS names internal to the target network.
+Gateway proxying does not replace Express/Nest/Python internal auth. Each destination must validate its own credentials.
 
-## Development
+## 5. Health and observability
+
+- `/healthz`: local liveness.
+- `/readyz`: dependency-aware readiness for configured Express and Nest endpoints.
+- Prometheus metrics are served on the configured metrics listener (Compose uses a separate internal metrics port).
+- Request IDs and bounded status/latency metrics support correlation.
+
+A readiness failure should identify the dependency class without exposing credentials or configuration values.
+
+## 6. Local development and tests
 
 ```bash
+cd services/api-gateway
 go test ./...
 go vet ./...
 go build ./...
 ```
 
-Run from `services/api-gateway/`.
+The root Compose file sets `GATEWAY_EXPRESS_URL`, `GATEWAY_NEST_URL`, `GATEWAY_GO_URL`, and `GATEWAY_PYTHON_URL`. Verify the actual environment variable names in `config.go`; do not copy production credentials into local shell history.
+
+## 7. Change checklist
+
+- [ ] Add only the required route prefix and document its service owner.
+- [ ] Update route/transport tests, including prefix and trailing-slash behavior.
+- [ ] Verify WebSocket upgrade and timeout behavior where applicable.
+- [ ] Test trusted proxy handling and spoofed forwarded headers.
+- [ ] Confirm health and metrics semantics.
+- [ ] Update NGINX path proxying only if the browser-facing path changes.
+- [ ] Update [request flows](../../docs/architecture/request-flows.md) and [API reference](../../docs/ai-api-reference.md) when relevant.

@@ -1,51 +1,70 @@
 # Relay Express API
 
-## Service responsibility
+**Runtime:** Node.js / Express
+**Responsibility:** authentication-backed collaboration HTTP routes, MongoDB persistence, Socket.IO realtime behavior, selected notifications/incidents, and the public adapter to internal AI operations.
 
-The Express service owns collaboration-oriented HTTP routes and Socket.IO realtime behavior. Its route composition includes authentication, messages, notifications, incidents, AI integration, and internal call-event handling.
+## 1. Runtime composition
 
-## Architecture
+| Path | Responsibility |
+|---|---|
+| `src/bootstrap.js` | startup, configuration, dependency initialization, process lifecycle |
+| `src/server.js` | server composition where applicable |
+| `src/app.js` | middleware, health/metrics, and route mounting |
+| `src/routes/` | HTTP route modules |
+| `src/controllers/` | reusable domain handlers |
+| `src/middleware/auth.middleware.js` | session/JWT authentication and `req.user` hydration |
+| `src/models/` | Mongoose models such as User, Message, Notification, AI execution |
+| `src/lib/socket.js` | Socket.IO server, identity, rooms, lifecycle |
+| `src/lib/redis.js` | Redis connection and coordination |
 
-- `src/app.js` composes middleware, health endpoints, metrics, and route modules.
-- `src/bootstrap.js` owns process startup and lifecycle.
-- `src/routes/` defines HTTP route contracts.
-- `src/controllers/` contains request handlers.
-- `src/models/` defines Mongoose models.
-- `src/lib/socket.js` configures Socket.IO and realtime rooms.
-- `src/lib/db.js` and `src/lib/redis.js` manage persistence connections.
-- `src/middleware/` contains authentication and rate limiting.
-- `src/swagger.js` provides API documentation.
+## 2. Route domains
 
-## Domain capabilities
+The app mounts `/api/auth`, `/api/messages`, `/api/notifications`, `/api/incidents`, `/api/ai`, and internal call-event routes under `/internal`. The public edge still routes `/api` to this service through the Go Gateway.
 
-- Account registration, login, mobile login/signup, logout, session check, and profile update.
-- User lookup and message history/send/read/update operations.
-- Notification preferences, device-token registration, listing, and read state.
-- Incident and AI route integration.
-- Internal call event intake from the NestJS call domain.
-- Realtime connection and user-room event delivery.
+## 3. Authentication and request security
 
-## Authentication contracts
+The auth middleware validates a signed session/JWT and loads the corresponding Mongo User record, selecting the fields needed downstream (`_id`, `email`, `fullName`, `profilePic`). The password hash is excluded. `req.user` is therefore a trusted server-loaded identity for authenticated route handlers.
 
-Browser clients use the cookie-based session behavior. Native clients use `POST /api/auth/mobile/login` and `POST /api/auth/mobile/signup` to obtain a bearer token. Protected routes accept the configured cookie or bearer authorization mode. Socket.IO authenticates using browser cookie context or a token supplied in the handshake `auth.token` field.
+Browser requests are subject to configured CORS/origin handling and session/cookie behavior. Native clients use bearer credentials. Socket.IO has a separate handshake authentication path; HTTP auth success does not automatically establish a valid socket session.
 
-The native token is stateless and has a configured expiration. Client-side deletion on logout is not equivalent to server-side revocation of a copied token.
+Security controls include Helmet, credentialed CORS, JSON body limits, route-specific rate limits, trusted-origin checks, and centralized error handling. Review actual middleware order in `src/app.js` before changing a route.
 
-## Data and dependencies
+## 4. Realtime contract
 
-MongoDB/Mongoose stores collaboration documents. Redis supports selected cache, rate-limit, and coordination functions. The service integrates with the Python AI API and NestJS call domain through internal endpoints and tokens.
+Socket.IO owns connection lifecycle, authenticated user identity, and room targeting. Event producers and consumers must agree on payload shape, idempotency, ordering assumptions, reconnection behavior, and room authorization. Never allow clients to select arbitrary user rooms without server-side authorization.
 
-## Development and tests
+## 5. AI adapter and shared Knowledge Base
 
-```bash
-pnpm --dir services/express-api dev
-pnpm --dir services/express-api run test:integration
-```
+Express forwards authenticated `/api/ai` requests to the internal Python service with:
+
+- internal service Authorization credential;
+- `X-Relay-User-Id` derived from `req.user._id`;
+- bounded JSON body and an abort deadline.
+
+For answer responses, Express resolves cited documents' internal uploader IDs against the User model and returns display names as `uploaded_by`. It removes internal uploader IDs from public citation objects. The current Knowledge Base search/answer retrieval path is shared across authenticated Relay users, while document ingestion/list/direct retrieval operations remain uploader-tenant-scoped. Uploader display attribution is informative; it is not an ACL.
+
+## 6. Local development
 
 From the repository root:
 
 ```bash
-pnpm test:express-api
+pnpm install --frozen-lockfile
+pnpm --filter @relay/express-api run dev
+pnpm --filter @relay/express-api run test:integration
 ```
 
-Validate HTTP and Socket.IO authorization separately, including room membership and event-level access.
+The service requires MongoDB and Redis configuration. The root Compose topology is the simplest integrated environment. Use `.env.example` as a variable inventory; do not copy secrets from another environment.
+
+## 7. Operational guidance
+
+Monitor request rate/errors/latency, authentication failures, Mongo/Redis connections, Socket.IO connection errors, upload/AI adapter timeouts, and internal dependency readiness. `Session ID unknown` is a Socket.IO Engine.IO session/transport symptom; correlate it with client reconnect and proxy behavior rather than treating it automatically as an AI route failure.
+
+## 8. Change checklist
+
+- [ ] Auth and origin behavior tested for browser and native clients.
+- [ ] Body-size and timeout limits appropriate to the route.
+- [ ] User ownership and authorization derived from `req.user`, not client-supplied IDs.
+- [ ] Socket.IO room/event permissions reviewed.
+- [ ] Service-to-service token and user identity propagated separately.
+- [ ] Error responses do not leak upstream secrets or internal stack traces.
+- [ ] Tests and API docs updated.

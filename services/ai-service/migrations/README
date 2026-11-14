@@ -1,1 +1,57 @@
-Generic single-database configuration.
+# AI Service Database Migrations
+
+This directory contains Alembic migration configuration and revision history for the Python AI service. It is operational schema code: treat changes here with the same review rigor as application data contracts.
+
+## Responsibilities
+
+- `alembic.ini` at the service root configures Alembic.
+- `migrations/env.py` binds migration execution to the service's SQLAlchemy metadata and database configuration.
+- `migrations/versions/` stores ordered revision scripts.
+- The service model definitions live under `app/models/`.
+
+Confirm the exact current file list before relying on optional helper scripts. Do not edit generated revision identifiers or reorder applied history.
+
+## Local workflow
+
+From `services/ai-service/` with the service virtual environment and database settings configured:
+
+```bash
+alembic current
+alembic history --verbose
+alembic upgrade head
+```
+
+Create a revision only after model and schema changes are reviewed:
+
+```bash
+alembic revision -m "describe schema change"
+```
+
+Autogeneration is a draft, not an approval. Review generated SQL for indexes, constraints, foreign keys, server defaults, vector types/extensions, and data transformations. Explicitly handle operations Alembic cannot infer safely.
+
+For a local disposable database, `alembic downgrade -1` can help validate a reversible change. Never run a downgrade against shared or production data merely because a migration file contains a downgrade function.
+
+## Migration design rules
+
+1. Prefer additive expand-and-contract changes for online deployments.
+2. Keep migrations deterministic and safe to rerun only when the migration framework semantics support that behavior.
+3. Avoid expensive full-table rewrites on latency-sensitive production tables without a backfill plan.
+4. For embedding changes, document dimensions, model identity, re-embedding strategy, and mixed-version behavior.
+5. Preserve tenant/document composite integrity and chunk foreign-key relationships.
+6. Add or modify indexes with a deployment strategy appropriate to table size and database capabilities.
+7. Record expected row counts and post-migration validation queries.
+8. Define a restore or forward-repair plan for destructive transformations.
+
+## Release procedure
+
+- verify backup and restore evidence;
+- test upgrade against a representative database snapshot;
+- inspect generated SQL and execution plan for large operations;
+- deploy application versions compatible with both pre- and post-migration schema when possible;
+- run the migration through one controlled release actor;
+- verify Alembic current revision, constraints, indexes, and application smoke tests;
+- retain logs and the migration revision in the release record.
+
+## Safety
+
+Never store credentials in migration files. Never drop tenant, document, or chunk data as a shortcut to changing access policy. Migration changes must preserve application-level authorization and data-retention requirements.

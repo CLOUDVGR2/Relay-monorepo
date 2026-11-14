@@ -1,26 +1,37 @@
-# Code Commenting Standard
+# Code Commenting and Technical Documentation Standard
 
-## Purpose
+## 1. Purpose
 
-Comments explain intent, invariants, security assumptions, lifecycle constraints, and non-obvious implementation choices. They complement executable names and types; they do not duplicate the code.
+Comments explain intent, invariants, safety boundaries and non-obvious trade-offs. They should not paraphrase code or become a stale second implementation.
 
-## Required practices
+## 2. Required practices
 
-- Explain why a security check or authorization boundary exists.
-- Document concurrency, retry, idempotency, and shutdown invariants.
-- Describe non-obvious data transformations and compatibility constraints.
-- Keep public API and event comments aligned with generated documentation.
-- Use language-native documentation conventions for exported Go symbols, Python modules, and TypeScript public contracts.
-- Update comments in the same change as behavior.
+- Explain **why** an invariant exists when the code alone cannot show it.
+- Document security boundaries, ownership predicates, lease/fencing rules, message acknowledgement order and retry semantics.
+- Explain non-obvious units, limits and timeout budgets.
+- Use language that distinguishes required behavior from best-effort behavior.
+- Keep comments near the code they govern.
+- Update comments and API docs in the same change as the implementation.
+- Prefer typed names and self-describing functions over explanatory comments for obvious operations.
 
-## Avoid
+## 3. API and schema documentation
 
-- Narrating obvious statements.
-- Leaving stale TODOs or references to removed behavior.
-- Embedding credentials, private data, or environment-specific secrets.
-- Claiming guarantees that the implementation does not enforce.
-- Using comments as a substitute for validation or tests.
+- Document route ownership, authentication mode, input constraints, status/error responses and pagination.
+- Identify whether a route is public, internal or diagnostic.
+- Do not expose secret environment values or internal credential examples.
+- Mark defaults and bounds from executable validation rather than copying unverified assumptions.
 
-## Review check
+## 4. Avoid
 
-A reviewer should be able to distinguish the contract, invariant, and rationale from the implementation itself. If a comment becomes inaccurate after a refactor, remove or update it.
+- Comments that simply restate a line.
+- Claims that a route is public without checking Gateway/NGINX exposure.
+- Claims of thread safety, idempotency, durability or security without code/test support.
+- Provider secrets, personal data and production identifiers.
+- TODOs without owner/context or obsolete comments left after a refactor.
+
+## 5. Review checklist
+
+- Does the comment explain a non-obvious decision or invariant?
+- Is it still true for the current implementation?
+- Does the API documentation match the actual route/DTO/schema?
+- Does the document distinguish implementation from deployment and operational evidence?

@@ -1,77 +1,73 @@
-# Relay Engineering Handbook
+# Relay Engineering Contribution Guide
+
+This guide defines the contribution workflow for a polyglot monorepo. The goal is to keep service ownership explicit while allowing cross-service changes to be reviewed as one coherent system change.
 
 ## 1. Repository model
 
-Relay is a pnpm monorepo containing browser and mobile clients, Node.js APIs, Go services, a Python AI service, and infrastructure-as-code. Service boundaries are represented by package manifests, Go modules, Python dependency manifests, Dockerfiles, Compose services, Kubernetes resources, and CI workflows.
+The pnpm workspace includes `apps/*`, `services/express-api` and `services/nest-api`. Go services have independent Go modules. The Python AI service has its own requirements, application package, tests and Alembic migrations. Docker/Compose, Kubernetes, Terraform, monitoring and CI assets are maintained in their respective folders.
 
-The root workspace is the orchestration point for JavaScript packages. Go and Python components retain their native build and test toolchains.
+Read [Repository Layout](docs/repository-layout.md) and [Service Catalog](docs/architecture/service-catalog.md) before changing a boundary.
 
 ## 2. Source ownership
 
-| Area | Canonical implementation |
+| Area | Primary owner |
 |---|---|
-| Browser client | `apps/web/` |
-| Native client | `apps/mobile/` |
-| Public gateway | `services/api-gateway/` |
-| Collaboration HTTP and realtime | `services/express-api/` |
-| GraphQL, calls, tasks, recording uploads | `services/nest-api/` |
-| Job submission and status | `services/jobs-api/` |
-| Queue processing | `services/jobs-worker/` |
-| AI, retrieval, incident intelligence, multi-agent execution, recording worker | `services/ai-service/` |
-| Container and Kubernetes delivery | `infrastructure/` and `compose.yaml` |
-
-A service's implementation and its tests define the executable contract. Documentation describes those contracts and must be updated when interfaces or operational semantics change.
+| Browser and mobile experience | `apps/web`, `apps/mobile` |
+| Public route policy | `services/api-gateway` |
+| Identity, messages, notifications, Socket.IO | `services/express-api` |
+| Conversations, tasks, calls, recording, jobs facade | `services/nest-api` |
+| Asynchronous job submission/worker | `services/jobs-api`, `services/jobs-worker` |
+| RAG, incident intelligence, conversation analysis, multi-agent, recording worker | `services/ai-service` |
+| Deployment/monitoring/security automation | `infrastructure/`, `monitoring/`, `.github/` |
 
 ## 3. Development workflow
 
-1. Identify the owning service and downstream consumers.
-2. Read the route, resolver, DTO/schema, persistence layer, and relevant tests before changing behavior.
-3. Preserve API compatibility or document and test an intentional contract migration.
-4. Add focused tests for normal, invalid, unauthorized, duplicate, and dependency-failure paths as applicable.
-5. Run the owning service's formatter, linter, type checker, build, and tests.
-6. Run integration checks for cross-service changes.
-7. Validate Compose or Kustomize configuration when deployment behavior changes.
-8. Update architecture, API, security, and operational documentation in the same change.
-9. Record exact verification commands and outcomes in the pull request.
+1. Start from a clean branch and identify all affected producers/consumers.
+2. Read the route/schema/model and the relevant tests before editing.
+3. Keep a change scoped to its owning service unless a contract requires a coordinated update.
+4. Update dependency manifests and lockfiles together when packages change.
+5. Add/adjust tests for happy path, invalid input, authorization, retry and failure behavior as applicable.
+6. Update documentation and API descriptions in the same pull request.
+7. Run the focused test suite, lint/typecheck/build and relevant consumer tests.
+8. Inspect `git diff --check`, status and staged files before committing.
 
 ## 4. Contract discipline
 
-- HTTP methods, paths, authentication modes, schemas, status codes, and error semantics are part of the API contract.
-- GraphQL field and mutation names, input types, nullability, authorization guards, and pagination are versioned interfaces.
-- Socket.IO event names, payloads, room membership, and handshake authentication are compatibility-sensitive.
-- RabbitMQ routing keys, queue names, message schemas, delivery mode, retry metadata, and acknowledgement semantics are service contracts.
-- Database columns, indexes, constraints, migration order, and ownership boundaries are persistence contracts.
-- Environment variables are deployment interfaces and require validation and examples.
+- Gateway route allowlist is separate from upstream routes.
+- Express REST/Socket.IO, Nest GraphQL/REST, Python internal FastAPI, Go HTTP and RabbitMQ payloads are distinct contracts.
+- Internal bearer authentication and Relay user identity are separate concerns.
+- Do not expose internal service endpoints by adding a proxy rule without a threat-model and API review.
+- Preserve stable response fields or coordinate version/compatibility changes with all callers.
 
-## 5. Security review
+## 5. Data and migration discipline
 
-For every change, assess identity provenance, authorization scope, tenant boundaries, input validation, secret handling, logging, request limits, dependency trust, and replay/idempotency behavior. Treat browser state, mobile payloads, model outputs, retrieved documents, queue messages, and forwarded headers as untrusted inputs.
+- Use Prisma migrations for Nest relational schema.
+- Use Alembic migrations for AI-service schema.
+- Review MongoDB model compatibility and backfill needs.
+- Preserve document/chunk tenant foreign keys and ownership semantics.
+- Design cross-store changes for partial failure and safe retry.
+- Include rollback and forward-recovery strategy.
 
-Never add credentials, populated environment files, signing keys, tokens, or production connection strings to version control.
+## 6. Security review
 
-## 6. Testing and evidence
+Review authentication, authorization, CORS/trusted proxy behavior, body limits, rate limits, internal tokens, log privacy, secret injection, object storage permissions and tenant predicates. Shared Knowledge Base retrieval is cross-user; any change to visibility or data classes requires explicit review.
 
-Use the root scripts for common workspace checks:
+## 7. Testing evidence
 
-```bash
-pnpm test:all
-pnpm build:all
-pnpm typecheck:mobile
-```
+Use the focused scripts in [Testing Strategy](docs/testing-strategy.md). Report the exact command and environment. A passing component test is not evidence of physical-device behavior; Kustomize rendering is not evidence of deployment; a green single-service workflow is not evidence that every service works together.
 
-Run service-specific checks where the root scripts do not cover the relevant workflow. Go services use `go test ./...`, `go vet ./...`, and `go build ./...`. Python tests use the service virtual environment and pytest. Infrastructure changes require Kustomize rendering, Terraform formatting/validation, and the relevant policy/security checks.
+## 8. Pull request standard
 
-A passing unit test is evidence for the assertions it executes. Integration and deployment claims require corresponding integration or environment evidence.
+Complete `.github/pull_request_template.md`. Include:
 
-## 7. Pull request standard
+- problem and expected user/operational outcome;
+- changed service boundaries and API/event/data contracts;
+- authorization, privacy and threat considerations;
+- tests, build output and manual/device validation;
+- migration/deployment/rollback plan;
+- documentation/runbook changes;
+- known limitations and rollout risk.
 
-A reviewable pull request includes:
-- concise purpose and user/operator impact;
-- owning services and consumers;
-- contract, schema, and configuration changes;
-- security and privacy analysis;
-- focused and broader verification results;
-- rollout, migration, and rollback considerations;
-- documentation updates.
+## 9. Documentation and naming
 
-The repository pull-request template is the canonical checklist.
+Use concise headings, accurate file paths and executable commands. Mark implementation, proposal and production verification separately. Do not write unsubstantiated scale, compliance, SLO or certification statements. ADRs are historical decision records; supersede them with a new ADR rather than silently rewriting decision history.

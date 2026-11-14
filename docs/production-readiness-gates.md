@@ -1,49 +1,91 @@
-# Release Acceptance and Production Verification
+# Production Readiness Gates
 
-This document defines the evidence required to accept a Relay release into a production environment.
+**Purpose:** define objective acceptance evidence for a Relay production launch or material expansion. This checklist is intentionally stricter than “containers start” or “CI passes.” A gate is complete only when evidence is reviewed and retained by its named owner.
 
-## Gate 1 — Artifact integrity
+## Gate 0 — Product and service ownership
 
-- Source commit and dependency lockfiles are recorded.
-- Container images are traceable to the source commit.
-- Published artifacts are scanned and referenced by immutable digest.
-- Build provenance and deployment manifests are retained.
+- [ ] Product owner, technical owner, and on-call owner assigned for each user journey.
+- [ ] Service catalogue, dependency graph, data classification, and external integrations reviewed.
+- [ ] User-facing capabilities and known limitations accurately represented.
+- [ ] Support process, escalation, and customer communication paths established.
 
-## Gate 2 — Contract and data compatibility
+## Gate 1 — Security and privacy
 
-- HTTP, GraphQL, Socket.IO, and AMQP changes are reviewed with their consumers.
-- Database migrations are ordered and tested against representative data.
-- Tenant and ownership constraints are covered by positive and negative tests.
-- Rollback compatibility is documented.
+- [ ] Threat model reviewed for browser/mobile, API, WebSocket, GraphQL, AI, workers, storage, and CI/CD.
+- [ ] Authentication, authorization, object ownership, tenant boundaries, and internal service identity tested.
+- [ ] Shared Knowledge Base behavior explicitly approved: authenticated users can search across tenant-owned documents; this is a data-sharing policy, not merely a retrieval optimization.
+- [ ] Document uploader attribution is not treated as an access-control boundary.
+- [ ] Secrets managed and rotated; no secrets in repository, image, logs, or build artifacts.
+- [ ] TLS, ingress, egress, firewall, workload identity, and admin access reviewed.
+- [ ] Dependency, source, secret, and image scans reviewed with remediation SLAs.
+- [ ] Retention, deletion, consent, privacy notice, legal hold, and subject-request behavior reviewed.
+- [ ] Security incident reporting and evidence-preservation process tested.
 
-## Gate 3 — Security
+## Gate 2 — Data durability and recovery
 
-- Authentication and authorization tests pass for protected routes.
-- Secrets are injected through the approved secret mechanism.
-- Network policies, IAM permissions, and service accounts follow least privilege.
-- Container and Kubernetes security checks are reviewed.
-- Sensitive values are excluded from logs, artifacts, and client bundles.
+- [ ] PostgreSQL, MongoDB, object storage, and required broker state have approved backup policies.
+- [ ] Restore tests completed in an isolated environment with measured RPO/RTO.
+- [ ] Encryption at rest/in transit and key ownership verified.
+- [ ] Migration order, compatibility, rollback/forward-repair, and data validation rehearsed.
+- [ ] Recording object retention, lifecycle, deletion, and authorization tested.
+- [ ] Queue replay and idempotency behavior tested under worker restart.
 
-## Gate 4 — Reliability
+## Gate 3 — Reliability and observability
 
-- Liveness and readiness probes reflect the service's actual ability to serve.
-- Timeouts, retries, concurrency, queue prefetch, and shutdown are bounded.
-- Duplicate delivery and retry behavior are tested.
-- Worker heartbeats and dead-letter handling are observable.
-- Backup and restore procedures have been exercised.
+- [ ] Health/readiness semantics reviewed and dependency probes tested.
+- [ ] SLOs approved, instrumented, and tied to user journeys.
+- [ ] Alert delivery and escalation tested end to end.
+- [ ] Logs are structured, correlated, access-controlled, and redacted.
+- [ ] Metrics labels are bounded; high-cardinality identifiers stay out of labels.
+- [ ] Dashboards and runbooks match deployed service versions.
+- [ ] Capacity, queue-age, storage, model quota, and saturation alerts are configured.
 
-## Gate 5 — Performance and capacity
+## Gate 4 — Performance and capacity
 
-- Representative workload profiles are defined.
-- API latency, error rate, queue age, worker throughput, and resource consumption are measured.
-- Database pool sizing and broker capacity are validated under expected concurrency.
-- AI provider limits, token budgets, and execution timeouts are configured.
+- [ ] Representative workload and dataset agreed.
+- [ ] Load/soak/spike and failure-injection tests run against production-like topology.
+- [ ] API p95/p99, DB pools, queue latency, realtime concurrency, object throughput, and AI latency within approved limits.
+- [ ] Autoscaling and failover capacity verified where deployed.
+- [ ] Cost model includes compute, databases, broker, object storage, egress, telemetry, and model usage.
 
-## Gate 6 — Operational ownership
+## Gate 5 — API and release compatibility
 
-- Service owners and escalation contacts are identified.
-- Dashboards and alert routing are configured.
-- Deployment, rollback, recovery, and incident procedures are accessible.
-- Release notes and operator handoff are complete.
+- [ ] Public route allowlist and downstream ownership reviewed.
+- [ ] OpenAPI/GraphQL/Socket.IO/AMQP contracts versioned or compatibility-reviewed.
+- [ ] Mobile and web client version skew tested.
+- [ ] Rate limits, payload bounds, timeouts, cancellation, retries, and idempotency verified.
+- [ ] Images and dependencies pinned; provenance and SBOM retained where available.
+- [ ] CI branch triggers and required status checks match the protected default branch.
 
-Approval is based on recorded evidence for the target environment and release artifact. A manifest render or unit test is not a substitute for an end-to-end deployment check.
+## Gate 6 — Operational execution
+
+- [ ] Release/change window, operator, approvals, and rollback decision-maker recorded.
+- [ ] Runbooks cover deploy, rollback, database restore, service degradation, broker failure, AI provider failure, call/recording failure, and security incident.
+- [ ] Synthetic smoke tests use isolated non-production data and safe identities.
+- [ ] Support and customer communication templates reviewed.
+- [ ] Post-deploy monitoring window and success criteria agreed.
+
+## Gate 7 — Formal go/no-go
+
+The go/no-go record must contain:
+
+| Item | Evidence |
+|---|---|
+| Release identity | commit SHA, image digests, manifest/config version |
+| Gate status | pass/fail/exception per gate, owner, timestamp |
+| Open risks | description, probability/impact, mitigation, accountable owner |
+| Accepted exceptions | approver, expiry, compensating control, revisit date |
+| Operational readiness | on-call route, alerts, dashboards, runbooks |
+| Recovery readiness | tested restore date, measured RPO/RTO, recovery owner |
+| Decision | go / conditional go / no-go and approving authority |
+
+## Current evidence caveat
+
+This repository provides implementation, tests, workflows, Compose services, observability configuration, and AWS/Kubernetes templates. It does not establish that production controls are deployed, independently audited, legally approved, or operating to a particular SLA. A launch decision requires environment-specific evidence.
+
+## Related documents
+
+- [Technical due diligence](governance/technical-due-diligence.md)
+- [Security and operations](security-and-operations.md)
+- [Reliability objectives](reliability/slo-and-error-budgets.md)
+- [Production guide](production-guide.md)

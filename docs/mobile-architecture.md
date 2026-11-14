@@ -1,48 +1,81 @@
 # Relay Mobile Architecture
 
-## Runtime and framework
+## 1. Runtime model
 
-The native client is an Expo application implemented with React Native and TypeScript. Its package manifest includes Expo SDK 57, React Native 0.86, React Navigation, Expo SecureStore, SQLite, Notifications, FileSystem, Speech, and `react-native-webrtc`.
+Relay Mobile is an Expo/React Native TypeScript application targeting Android and iOS. The current source tree is organized around screens, shared UI components, hooks, transport libraries, navigation types and theme tokens. The Compose `mobile` service runs the Expo development server; it is not a production-distributed native application binary.
 
-The app is organized around screen modules, navigation types, reusable UI components, call/media hooks, and shared networking libraries.
+## 2. Source ownership
 
-## Screen domains
+| Path | Responsibility |
+|---|---|
+| `App.tsx` | Native application entry and composition |
+| `src/screens/` | Authentication, conversation, call, task, AI, activity and notification screens |
+| `src/components/` | Shared screen primitives and incoming-call overlay |
+| `src/hooks/useCallMedia.ts` | Media-session and call/recording lifecycle coordination |
+| `src/lib/api.ts` | Axios API client and bearer token handling |
+| `src/lib/graphql.ts` | GraphQL transport and operations |
+| `src/lib/realtime.ts` | Socket.IO connection lifecycle |
+| `src/lib/offline-message-cache.ts` | Local message caching |
+| `src/lib/call-audio-recorder.ts` | Native audio capture integration |
+| `src/lib/call-recording-api.ts` | Recording upload API operations |
+| `src/lib/call-recording-recovery.ts` | Local recovery state and retry workflow |
+| `src/navigation/` | Navigation types |
+| `src/theme/` | Theme/color tokens |
 
-- Authentication and account access.
-- Conversations and message history.
-- Calls and incoming-call presentation.
-- AI assistant and multi-agent task workflows.
-- Task management.
-- Activity inbox and notification preferences.
+## 3. Network configuration
 
-## HTTP networking
+The API origin is configured through `EXPO_PUBLIC_API_URL`, for example:
 
-`src/lib/api.ts` creates a shared Axios client. The base URL is read from `EXPO_PUBLIC_API_URL`, normalized without a trailing slash, and extended with `/api` by callers through the shared base URL. The client uses a 12-second timeout, JSON headers, and an in-memory bearer token. Native requests disable browser credential cookies.
-
-The response interceptor routes HTTP 401 responses to the registered unauthorized handler. Network failures and timeouts are normalized into user-readable messages.
-
-For physical devices, the API hostname must be reachable from the device network. A device's `localhost` points to the device, not the development workstation. The public API origin must be served by a reachable gateway or host port-forward.
-
-## Realtime transport
-
-`src/lib/realtime.ts` creates a Socket.IO client using the API origin and supplies the native access token in the handshake `auth` object. Reconnection is enabled with a capped delay. The configured transport is polling, and development logs expose connection lifecycle diagnostics without requiring message payload logging.
-
-## Calls and recording
-
-The mobile call experience is coordinated by `hooks/useCallMedia.ts`, `components/IncomingCallOverlay.tsx`, and `screens/CallsScreen.tsx`. Audio capture and recording utilities are isolated under `src/lib/`. Recording recovery and upload API concerns are separated into dedicated modules.
-
-Call authorization is server-owned. Client-side consent and media state must not be treated as a substitute for server verification. Recording upload completion is finalized by the NestJS API and downstream processing services.
-
-## Local persistence and privacy
-
-The client includes an offline message cache and recording recovery support. SecureStore is available for sensitive native key/value data; SQLite provides structured local persistence. Persistent local data should be scoped to the authenticated account and cleared or invalidated at the authentication boundary.
-
-## Build and verification
-
-```bash
-pnpm --dir apps/mobile typecheck
-pnpm --dir apps/mobile lint
-pnpm dev:mobile
+```dotenv
+EXPO_PUBLIC_API_URL=http://<host-reachable-address>:8090/api
 ```
 
-Native builds and device behavior should be verified on the target OS and device class. Expo bundler reachability and API reachability are separate network paths.
+Typical local development origins differ:
+
+| Runtime | Host alias commonly used |
+|---|---|
+| iOS simulator | `localhost` on the host machine |
+| Android emulator | `10.0.2.2` for host loopback |
+| Physical device | Host LAN IP or HTTPS development endpoint |
+
+Use the actual device/simulator networking environment. An Expo bundler connection does not prove the API host can be reached. Do not include server secrets in `EXPO_PUBLIC_*` values.
+
+## 4. Authentication
+
+Native HTTP requests use the bearer-token mode supported by Express and NestJS. `api.ts` centralizes token attachment and API error handling. Keep token handling centralized; do not duplicate credentials in screen state or log authorization headers. Logout/session expiry must clear local authentication state and respect the server's account/session semantics.
+
+GraphQL and Socket.IO have independent transport entry points. Validate the authenticated identity and authorization context for all three transports.
+
+## 5. Realtime behavior
+
+`realtime.ts` manages Socket.IO lifecycle. Reconnection, stale session IDs, handshake authentication, user-room routing and event deduplication should be validated separately from HTTP tests. The UI should distinguish connection loss from an empty conversation or missing data.
+
+## 6. Calls and recording
+
+The native media flow spans:
+
+1. server-owned call state and participant authorization;
+2. consent-aware media-session authorization;
+3. local media acquisition and audio route lifecycle;
+4. local recording capture;
+5. upload session creation/refresh and file transfer;
+6. completion metadata validation;
+7. local recovery when upload or finalization fails;
+8. asynchronous server-side transcription/analysis.
+
+“Call ended” does not mean “recording uploaded” or “recording processed.” UI states should reflect the server lifecycle rather than infer completion from a button press. Test app background/foreground, process termination, device storage pressure, permission denial, network interruption and retry.
+
+## 7. Local persistence and privacy
+
+The local message cache and recording-recovery state improve resilience, but their retention and protection should be reviewed. Avoid persisting credentials or raw audio outside an approved secure lifecycle. Clear user-scoped caches on logout/account switch. Validate SQLite/secure-storage behavior on physical devices and OS upgrades.
+
+## 8. Development and verification
+
+```bash
+pnpm install
+pnpm dev:mobile
+pnpm typecheck:mobile
+pnpm --dir apps/mobile lint
+```
+
+The Expo Metro port, device connection and API origin are separate. For release readiness, add platform-specific Android/iOS build, signing, permission, push-notification, WebRTC, offline and recording-recovery evidence. Typecheck and lint do not replace device validation.

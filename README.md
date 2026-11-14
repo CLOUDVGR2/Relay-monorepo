@@ -1,88 +1,88 @@
-# Relay
+# Relay — Collaborative Operations and AI Platform
 
-Relay is an enterprise-grade, cloud-native engineering ecosystem spanning Full-Stack and Mobile Development, AI and Agentic Systems, Distributed Architecture, Data Engineering, Cloud Infrastructure, Security, and Platform Operations.
+**Relay** is a multi-client, multi-service software platform that brings together team collaboration, real-time communication, work coordination, AI-assisted knowledge workflows, and operational tooling. The repository is organized as a polyglot monorepo: React and Expo clients, TypeScript/Node APIs, Go gateway and job services, a Python AI service, persistent data stores, messaging infrastructure, and deployment/observability assets.
 
-Its architecture integrates React, React Native and Expo with independently deployable backend services built using TypeScript, Node.js, Express, NestJS, Go and Python. REST, GraphQL, and asynchronous messaging enable scalable API architectures and distributed service communication.
+This repository is intended to be read as an engineering system, not as a single application directory. Service boundaries, public routes, internal integrations, ownership rules, and deployment artifacts are documented below and in the technical dossier.
 
-AI capabilities include RAG, multi-agent systems, DAG-based orchestration, vector search, and tenant-aware knowledge retrieval, powered by PostgreSQL, pgvector, and intelligent processing pipelines.
+> **Evidence standard.** This documentation describes what is present in the supplied source tree. A component, test, Docker image, Kustomize overlay, or Terraform module is evidence of implementation or deployment preparation—not proof of a live production rollout, a measured service-level objective, external certification, or operation at a stated user scale. No such claims are made here.
 
-The data and messaging infrastructure incorporates PostgreSQL, MongoDB, Redis, RabbitMQ, RustFS, and asynchronous workers, supporting relational and document persistence, caching, event-driven processing, and object storage.
+## Executive overview
 
-Cloud-native infrastructure leverages AWS, Terraform, Docker, and Kubernetes, while GitHub Actions and Jenkins drive CI/CD. Prometheus and Grafana provide observability, monitoring, and operational intelligence. Security architecture encompasses identity propagation, authentication, authorization, tenant isolation, and service-level access controls.
+Relay combines synchronous, user-facing workflows with asynchronous execution:
 
-Relay demonstrates end-to-end engineering across:
+- **Collaboration:** identity and session flows, user discovery, conversations, message history, read state, notifications, and realtime delivery.
+- **Calls and media:** call lifecycle operations, participant and recording-consent handling, media-session authorization, upload lifecycle, object storage, and asynchronous recording processing.
+- **Work coordination:** tasks, checklists, task links, job submission, job history, and worker processing.
+- **AI and knowledge:** transcript analysis, incident intelligence, document ingestion, vector and keyword retrieval, evidence-grounded answers, and persisted multi-agent tasks.
+- **Platform operations:** health/readiness endpoints, metrics, containerized local composition, Kubernetes overlays, AWS Terraform, CI workflows, and operator documentation.
 
-AI & Agentic Systems Engineering
+The platform deliberately keeps client presentation, domain APIs, internal AI execution, and asynchronous workers in separate runtime boundaries. Those boundaries are important to understanding the system and evaluating its engineering trade-offs.
 
-Full-Stack & Mobile Engineering
-
-Backend, APIs & Microservices
-
-Distributed Systems & Event-Driven Architecture
-
-Data Engineering & Knowledge Systems
-
-Cloud Infrastructure & Kubernetes
-
-DevSecOps, Platform Engineering & SRE
-
-## Product surface
-
-| Domain | Capabilities represented in the implementation |
-|---|---|
-| Collaboration | Account access, user discovery, conversations, message history, real-time messaging, notifications, and activity views |
-| Native experience | Expo / React Native application for Android and iOS, authenticated API access, Socket.IO connectivity, call workflows, and local recording support |
-| Calls and media | Call lifecycle operations, media-session authorization, consent-aware recording upload, recording storage integration, and downstream processing |
-| Work management | Task creation and management, checklist items, task links, job submission, and job status |
-| AI assistance | Conversation analysis, incident intelligence, document ingestion, semantic retrieval, grounded answers, and multi-agent task execution |
-| Operations | Operational dashboards, incident workflows, service health, metrics, and deployment-oriented infrastructure |
-| Platform engineering | Docker Compose, Kubernetes Kustomize bases and overlays, Terraform modules, CI workflows, automated tests, and security scanning configuration |
-
-The table describes repository-backed product domains. Individual API contracts and deployment topology are documented in the relevant service references.
-
-## Architecture
+## System context
 
 ```mermaid
 flowchart TB
-  U[Browser and mobile users] --> WEB[React web application]
-  U --> MOB[Expo / React Native]
-  WEB --> GW[Go API Gateway]
-  MOB --> GW
-  GW --> EXP[Express API + Socket.IO]
-  GW --> NEST[NestJS API + GraphQL]
-  EXP --> M[(MongoDB)]
-  EXP --> R[(Redis)]
-  NEST --> PG[(PostgreSQL)]
-  NEST --> M
-  NEST --> AI[Python AI service]
+  Browser[Browser user] --> Web[React web application]
+  Native[Android / iOS user] --> Mobile[Expo / React Native application]
+  Web --> Nginx[NGINX static server and edge proxy]
+  Nginx --> Gateway[Go API Gateway]
+  Mobile --> Gateway
+  Gateway --> Express[Express API and Socket.IO]
+  Gateway --> Nest[NestJS domain API]
+  Express --> Mongo[(MongoDB)]
+  Express --> Redis[(Redis)]
+  Express --> AI[Python AI service]
+  Nest --> Mongo
+  Nest --> PG[(PostgreSQL)]
+  Nest --> GoJobs[Go Jobs API]
+  Nest --> AI
+  Nest --> Object[(S3-compatible object storage)]
+  GoJobs --> Rabbit[(RabbitMQ)]
+  Rabbit --> Worker[Go Jobs Worker]
+  Worker --> Redis
   AI --> PG
-  AI --> R
-  NEST --> OBJ[(S3-compatible recording storage)]
-  REC[Recording worker] --> PG
-  REC --> OBJ
-  REC --> AI
-  JOBAPI[Go Jobs API] --> MQ[(RabbitMQ)]
-  MQ --> JOBW[Go Jobs Worker]
-  JOBW --> R
-  MA[Multi-agent worker] --> PG
-  MA --> R
+  AI --> Redis
+  Recording[Python recording worker] --> PG
+  Recording --> Object
+  Recording --> AI
+  AgentWorker[Python multi-agent worker] --> PG
+  AgentWorker --> Redis
 ```
 
-The Go gateway exposes a deliberately narrow public route allowlist. Express owns `/api` and Socket.IO traffic; NestJS owns `/graphql`, `/calls`, `/jobs`, `/docs`, and `/health` paths. The Go Jobs API and Python internal APIs are not exposed as general public gateway routes. See [System Architecture](docs/architecture.md) and [API Contracts](docs/ai-api-reference.md).
+The Gateway's current public allowlist forwards `/api` and `/socket.io` to Express, and `/jobs`, `/graphql`, `/calls`, `/docs`, and `/health` to NestJS. It owns `/healthz`, `/readyz`, `/gateway/docs`, and `/gateway/openapi.json`. The configured Go Jobs API and Python AI service are not directly exposed by the Gateway route table. The NestJS jobs facade integrates with the Go Jobs API; the Express and NestJS services call the Python AI service over internal service URLs and bearer credentials.
+
+## Service ownership at a glance
+
+| Component | Primary responsibility | Main contract | Principal state/dependencies |
+|---|---|---|---|
+| `apps/web` | Browser experience and operational workspace | HTTP, GraphQL, Socket.IO via NGINX/Gateway | Browser-managed UI state; server-owned business state |
+| `apps/mobile` | Native Android/iOS experience | Bearer-authenticated HTTP, GraphQL, Socket.IO | Secure token storage, local message cache, recording recovery |
+| `services/api-gateway` | Public application routing and reverse proxy | HTTP and WebSocket forwarding | Route configuration, request IDs, gateway metrics |
+| `services/express-api` | Identity, collaboration, notifications, AI facade, realtime events | REST and Socket.IO | MongoDB, Redis, internal Nest/Python integrations |
+| `services/nest-api` | Conversation, task, call, job-facade, recording, AI domain operations | GraphQL and REST | PostgreSQL/Prisma, MongoDB/Mongoose, Redis, object storage, internal services |
+| `services/jobs-api` | Job submission, history/status, worker health | HTTP; internal job operations use bearer authentication | RabbitMQ, Redis |
+| `services/jobs-worker` | Consume and process supported asynchronous jobs | RabbitMQ messages | RabbitMQ, Redis coordination/status |
+| `services/ai-service` | RAG, conversation analysis, incident intelligence, multi-agent task API | FastAPI HTTP | PostgreSQL/pgvector, Redis, model providers |
+| `multi-agent-worker` | Claim and execute persisted multi-agent tasks | Python process and Redis/PostgreSQL coordination | PostgreSQL, Redis, configured provider adapters |
+| `recording-worker` | Retrieve recordings and run transcription/analysis processing | Python worker process | PostgreSQL, S3-compatible storage, model assets, AI API |
+
+See [the Enterprise Technical Dossier](docs/enterprise-technical-dossier.md) for the full system model, request paths, trust boundaries, evidence matrix, operational considerations, and review guide.
 
 ## Technology portfolio
 
-| Layer | Technologies | Repository location |
-|---|---|---|
-| Web | React 19, Vite, React Router, Zustand, Tailwind CSS, Vitest, Playwright | `apps/web/` |
-| Mobile | Expo SDK 57, React Native 0.86, TypeScript, React Navigation, WebRTC, SecureStore, SQLite | `apps/mobile/` |
-| API gateway | Go HTTP server, reverse proxy, Prometheus instrumentation | `services/api-gateway/` |
-| Collaboration API | Node.js, Express, Socket.IO, Mongoose, Redis | `services/express-api/` |
-| Domain API | NestJS, TypeScript, GraphQL, REST, Prisma, Mongoose, PostgreSQL | `services/nest-api/` |
-| Jobs API and worker | Go, Gin, RabbitMQ AMQP, Redis | `services/jobs-api/`, `services/jobs-worker/` |
-| AI services | Python, FastAPI, SQLAlchemy async, Alembic, pgvector, LangGraph, LiteLLM, MCP | `services/ai-service/` |
-| Persistence and messaging | MongoDB, PostgreSQL / pgvector, Redis, RabbitMQ, S3-compatible object storage | Compose and Kubernetes manifests |
-| Delivery | Docker, Docker Compose, Kubernetes, Kustomize, Terraform, GitHub Actions, Jenkins | `infrastructure/`, `.github/` |
+| Layer | Implementation visible in this repository |
+|---|---|
+| Browser | React 19, Vite, React Router, Zustand, Tailwind CSS, DaisyUI, Vitest, Playwright |
+| Native | Expo SDK 57, React Native 0.86, TypeScript, React Navigation, WebRTC-related call integration, SecureStore/SQLite dependencies |
+| API gateway | Go `net/http`, reverse proxy, request metadata, Prometheus instrumentation |
+| Collaboration API | Node.js 22, Express 4, Socket.IO, Mongoose, Redis |
+| Domain API | NestJS 12, TypeScript, GraphQL/Apollo, REST, Prisma, Mongoose, Redis |
+| Job services | Go, Gin, RabbitMQ AMQP, Redis |
+| AI service | Python 3.14 runtime image, FastAPI, SQLAlchemy async, Alembic, pgvector, LiteLLM, Ollama-compatible generation, LangGraph, MCP |
+| Persistence and messaging | MongoDB 8, PostgreSQL 17 with pgvector, Redis 7, RabbitMQ 4, RustFS S3-compatible object storage |
+| Delivery and operations | Docker, Docker Compose, Kubernetes/Kustomize, Terraform, GitHub Actions, Jenkinsfile, Prometheus, Grafana, Blackbox Exporter, cAdvisor |
+
+Versions above describe the supplied manifests and image definitions, not a claim that every production environment runs the same versions. The lockfiles and build manifests are authoritative.
 
 ## Repository map
 
@@ -91,92 +91,57 @@ apps/
   web/                         React browser application
   mobile/                      Expo / React Native application
 services/
-  api-gateway/                 Go public HTTP gateway
-  express-api/                 Express and Socket.IO collaboration API
-  nest-api/                    NestJS REST and GraphQL domain API
-  jobs-api/                    Go asynchronous job submission/status API
+  api-gateway/                 Go HTTP reverse proxy and public route policy
+  express-api/                 Express REST and Socket.IO collaboration API
+  nest-api/                    NestJS GraphQL and REST domain API
+  jobs-api/                    Go job submission and status API
   jobs-worker/                 Go RabbitMQ consumer
-  ai-service/                  Python AI, retrieval, incident, and worker modules
+  ai-service/                  Python AI, RAG, incident, multi-agent, recording code
 infrastructure/
-  aws/terraform/               AWS resource and IAM definitions
+  aws/terraform/               AWS infrastructure and IAM definitions
   kubernetes/                  Kustomize base, local overlay, AWS overlay
   devops/                      Jenkins and container build assets
-monitoring/                    Prometheus, Blackbox Exporter, Grafana provisioning
-tests/                         Cross-service integration, E2E, and performance contracts
-docs/                          Architecture, API, security, operations, and service references
+monitoring/                    Prometheus, Blackbox Exporter, Grafana configuration
+ tests/                        Integration, E2E, and performance test contracts
+ docs/                         Architecture, service, security, operations, and portfolio docs
 ```
 
-## Local development
+## Local development quick start
 
 ### Prerequisites
 
-- Node.js compatible with the workspace manifests and pnpm 12.
-- Go versions declared by each Go module.
-- Python 3.11+ compatible with the service dependencies.
-- Docker Engine with Docker Compose.
-- Android Studio / Xcode and the Expo development tooling for native builds.
-- `kubectl` and Kustomize for Kubernetes validation.
+- Node.js compatible with the workspace and pnpm 12.15.0.
+- Go versions supported by the modules under `services/*`.
+- Python compatible with `services/ai-service/requirements.txt` (the API container currently uses Python 3.14; the recording-worker Dockerfile uses Python 3.12).
+- Docker Engine and Docker Compose.
+- Expo device/simulator tooling for native-device verification.
+- `kubectl`, Kustomize, and Terraform only when validating infrastructure assets.
 
-### Install workspace dependencies
+### Install and configure
 
 ```bash
 corepack pnpm install
-```
-
-### Configure environment
-
-```bash
 cp .env.example .env
 ```
 
-Populate the required local-only values described by `compose.yaml`, each service `.env.example`, and the configuration reference. The Compose stack additionally requires recording-storage, internal service, and observability credentials that are intentionally generated locally. Never commit populated `.env` files.
-
-For the mobile application, configure `apps/mobile/.env` with a device-reachable API origin:
+Populate local-only values required by `compose.yaml` and the relevant service `.env.example` files. Do not commit populated environment files. The mobile app requires a device-reachable URL, for example:
 
 ```dotenv
 EXPO_PUBLIC_API_URL=http://<host-reachable-address>:8090/api
 ```
 
-On a physical device, `localhost` refers to the device itself. The address must resolve from the phone and the gateway must be exposed on the host network.
+A physical phone cannot use its own `localhost` to reach the development host. `EXPO_PUBLIC_*` values are embedded in the client bundle and must never contain server secrets.
 
-### Run the containerized platform
+### Start the containerized platform
 
 ```bash
 docker compose up -d --build
 docker compose ps
 ```
 
-The Compose file defines the application services, data stores, broker, object storage, and observability components. Inspect `compose.yaml` for port bindings, required variables, volume semantics, and service dependencies before using the stack.
+The local frontend is published at `http://localhost:8088`, the Go Gateway at `http://localhost:8090`, and Expo Metro at `http://localhost:8081`. Data-service ports and other host bindings are defined in `compose.yaml`; most backend dependencies are bound to loopback for local development.
 
-### Run selected development processes
-
-```bash
-pnpm dev:web
-pnpm dev:express-api
-pnpm dev:nest-api
-pnpm dev:mobile
-```
-
-Run Go services from their module directories:
-
-```bash
-cd services/api-gateway && go run .
-cd services/jobs-api && go run .
-cd services/jobs-worker && go run .
-```
-
-Run the Python service after creating its virtual environment and installing `requirements.txt`:
-
-```bash
-cd services/ai-service
-uvicorn app.main:app --reload
-```
-
-For a complete local topology, prefer Compose so service DNS names and dependency endpoints match the checked-in configuration.
-
-## Verification
-
-The root workspace exposes these aggregate commands:
+### Useful workspace commands
 
 ```bash
 pnpm test:all
@@ -186,24 +151,19 @@ pnpm test:e2e:web
 pnpm test:e2e:nest-api
 ```
 
-The aggregate scripts execute the commands currently declared in `package.json`; they do not imply that every browser journey, device build, infrastructure deployment, or production recovery exercise is included. Each service reference lists its focused checks. Capture the tested commit, command, environment, and exit status when publishing validation evidence.
+`test:all` and `build:all` execute the scripts in the root manifest. The AI test script expects `services/ai-service/.venv/bin/python` to exist. Focused service commands and current test boundaries are documented in [Testing Strategy](docs/testing-strategy.md).
 
-## Documentation
+## Engineering and evidence principles
 
-- [Engineering portfolio case study](docs/engineering-portfolio.md)
-- [Product and experience architecture](docs/product-experience.md)
-- [Platform overview](relay-platform-overview.md)
-- [System architecture](docs/architecture.md)
-- [Platform capabilities](docs/platform-capabilities.md)
-- [Repository structure](docs/repository-layout.md)
-- [Engineering standards](docs/engineering-standards.md)
-- [Security architecture](docs/security/threat-model.md)
-- [AI and retrieval architecture](docs/ai-knowledge-base.md)
-- [Mobile architecture](docs/mobile-architecture.md)
-- [Release and operations](docs/production-guide.md)
-- [Kubernetes deployment](docs/architecture/aws-deployment.md)
-- [Service documentation index](docs/README.md)
+Relay is evaluated through explicit ownership, reproducible builds, bounded interfaces, least-privilege service access, data-integrity rules, test evidence, and operational readiness—not through technology-name count. The repository contains implementation and infrastructure assets, but production acceptance requires environment-specific evidence: deployed image digests, database migration status, security review, backups and restore exercises, measured SLOs, capacity tests, monitoring and alert routing, and named operational ownership.
 
-## Engineering principles
+## Documentation map
 
-Relay is organized around explicit service ownership, authenticated service boundaries, tenant-aware data access, bounded asynchronous execution, observable interfaces, and declarative infrastructure. The client applications are presentation and interaction layers; authorization and data integrity remain server responsibilities. Service-specific contracts remain authoritative in their implementation and API schemas.
+- [Enterprise Technical Dossier](docs/enterprise-technical-dossier.md) — executive and technical master reference.
+- [System Architecture](docs/architecture.md) and [Service Catalog](docs/architecture/service-catalog.md) — boundaries and service responsibilities.
+- [API and AI Reference](docs/ai-api-reference.md) — route ownership and internal/public distinctions.
+- [Data Architecture](docs/data-architecture.md) — persistence, data ownership, and consistency.
+- [Security Threat Model](docs/security/threat-model.md) and [Security Policy](SECURITY.md) — trust boundaries and reporting.
+- [Platform Capabilities](docs/platform-capabilities.md) and [Engineering Portfolio](docs/engineering-portfolio.md) — implementation evidence for technical reviewers and hiring teams.
+- [Production Guide](docs/production-guide.md), [AWS Deployment](docs/architecture/aws-deployment.md), and [Operations](docs/operations/incident-response.md) — release and runtime practices.
+- [Documentation Index](docs/README.md) — complete guide map.

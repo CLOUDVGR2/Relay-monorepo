@@ -1,63 +1,101 @@
 # Relay Platform Overview
 
-## Platform purpose
+**Relay** is a collaboration and operational-intelligence platform delivered through browser and native clients. Its architecture combines synchronous workspaces—identity, conversations, messages, tasks, calls, and notifications—with asynchronous processing for job execution, knowledge retrieval, AI analysis, and media workflows.
 
-Relay is a collaboration and operational intelligence platform with browser and native clients. It combines synchronous user-facing workflows—identity, conversations, calls, tasks, and notifications—with asynchronous capabilities for job execution, AI analysis, document retrieval, and media processing.
+This document is the concise platform narrative. The [Enterprise Technical Dossier](docs/enterprise-technical-dossier.md) is the deeper architecture and due-diligence reference.
 
-The platform is implemented as a service-oriented monorepo. Each runtime has a distinct responsibility and technology boundary, while shared deployment configuration describes how the services are assembled.
-
-## Product domains
+## 1. Product domains
 
 ### Collaboration workspace
-- Account registration, login, session-aware navigation, and profile management.
+
+- Account registration, login, and session-aware navigation.
 - User discovery and conversation creation.
-- Message composition, history, read state, and real-time delivery through Socket.IO.
-- Notification preferences, device tokens, and activity inbox workflows.
+- Message composition, history, read state, and realtime delivery.
+- Conversation membership and participation.
 
-### Calls and recording
-- Call session creation, acceptance, decline, termination, and history.
-- Consent-aware media-session authorization.
-- Native audio capture and recording recovery.
-- Upload-session creation, completion, and refresh through the NestJS API.
-- Object storage integration and asynchronous recording transcription/analysis.
+### Tasks and operational coordination
 
-### Tasks and asynchronous work
-- User-owned tasks, checklist items, and links through GraphQL operations.
-- Jobs API for validated job submission and owner-scoped status retrieval.
-- RabbitMQ-backed worker execution with Redis status, idempotency, retry, and heartbeat coordination.
+- Task creation and updates in conversation context.
+- Checklist and task-link relationships.
+- Task activity and domain state through the NestJS API and PostgreSQL.
 
-### AI and operational intelligence
-- Conversation transcript analysis with structured output.
-- Incident creation, investigation, approval, execution, and recovery workflows.
-- Document ingestion, chunking, embedding, semantic search, and grounded answer generation.
-- Durable multi-agent task submission and progress/result retrieval.
+### Calls and media workflows
 
-## Runtime composition
+- Call lifecycle, participants, signaling, and media-session authorization.
+- Recording-consent decisions and recording upload lifecycle.
+- Recording tracks, transcripts, and generated summaries through asynchronous processing.
 
-| Runtime | Role | Primary interface |
-|---|---|---|
-| React web | Browser application and operational workspace | HTTP APIs, GraphQL, Socket.IO |
-| Expo mobile | Native Android/iOS companion | Express HTTP API, Socket.IO, NestJS GraphQL/REST |
-| Go API Gateway | Public HTTP reverse proxy and route policy | HTTP |
-| Express API | Identity, messaging, notifications, incident and AI integration routes | REST, Socket.IO |
-| NestJS API | Conversation, call, task, job, and recording domain operations | GraphQL, REST |
-| Go Jobs API | Job submission, status, and worker health | REST |
-| Go Jobs Worker | Asynchronous queue consumer | RabbitMQ, Redis |
-| Python AI service | AI orchestration, RAG, incident intelligence, multi-agent execution | FastAPI |
-| Recording worker | Recording retrieval, transcription, and analysis | PostgreSQL, object storage, AI API |
+### Knowledge and AI
 
-## Data and infrastructure
+- Document ingestion, chunking, embeddings, vector and full-text retrieval.
+- Evidence-grounded answers with server-validated citation IDs and abstention behavior.
+- Shared cross-user Knowledge Base retrieval in the current implementation: authenticated users can retrieve documents uploaded under other Relay users' workspaces. Upload/list/direct document access remain owner-scoped. This distinction is a product data-sharing policy and must be reviewed and communicated clearly.
+- Incident investigation, conversation analysis, and bounded multi-agent task workflows.
 
-- MongoDB stores Express-oriented user, message, and notification documents.
-- PostgreSQL stores relational domain and AI records, including tenant-scoped documents, chunks, incidents, and multi-agent task data.
-- pgvector supports semantic vector retrieval.
-- Redis supports selected cache, rate-limit, coordination, task status, idempotency, and heartbeat use cases.
-- RabbitMQ provides durable asynchronous job transport.
-- RustFS provides S3-compatible object storage in local Compose/Kubernetes environments; AWS deployment assets describe S3 integration.
-- Prometheus, Blackbox Exporter, and Grafana provide metrics collection, probing, and visualization configuration.
+### Background execution
 
-## Architectural model
+- Go Jobs API publishes supported job messages to RabbitMQ.
+- Go Jobs Worker consumes and processes the supported job contract with Redis-backed idempotency/status and retry/recovery logic.
+- Separate Python workers handle multi-agent execution and recording processing.
 
-Relay separates user-facing API contracts from internal execution services. Public traffic enters through the gateway route allowlist. Domain services enforce authentication, authorization, validation, and persistence semantics. Workers consume bounded asynchronous workloads and communicate through explicit broker or database contracts. AI operations are isolated behind the Python service and internal authentication.
+## 2. Client and service topology
 
-See [System Architecture](docs/architecture.md) for service interactions and [Platform Capabilities](docs/platform-capabilities.md) for the implementation inventory.
+```mermaid
+flowchart TB
+  WEB[React / Vite web] --> NGINX[NGINX frontend runtime]
+  MOBILE[Expo / React Native] --> EDGE[Go API Gateway]
+  NGINX --> EDGE
+  EDGE --> EX[Express API]
+  EDGE --> NEST[NestJS API]
+  EX --> MONGO[(MongoDB)]
+  EX --> REDIS[(Redis)]
+  NEST --> PG[(PostgreSQL)]
+  NEST --> EX
+  NEST --> JOBS[Go Jobs API]
+  JOBS --> MQ[(RabbitMQ)]
+  MQ --> WORKER[Go Jobs Worker]
+  WORKER --> REDIS
+  EX --> AI[Python AI service]
+  NEST --> AI
+  AI --> PG
+  AI --> MODEL[Embedding / generation provider]
+  NEST --> OBJ[(S3-compatible object storage)]
+  OBJ --> REC[Recording worker]
+```
+
+The diagram describes component relationships. Public reachability is restricted by the Gateway's explicit path allowlist and NGINX proxy configuration; an internal upstream URL is not automatically a public route.
+
+## 3. Architectural principles
+
+- **Explicit ownership:** each runtime owns a bounded contract; the Gateway routes but does not replace service-level authorization.
+- **Identity at trust boundaries:** clients authenticate to public APIs; internal services use separate internal credentials and propagated user identity where required.
+- **Durable state separated from transient coordination:** PostgreSQL/MongoDB own application records; Redis coordinates cache/status/idempotency; RabbitMQ carries asynchronous messages; object storage carries large media artifacts.
+- **Evidence-grounded AI:** retrieved material constrains responses; citations are checked against retrieved chunks; lack of support must lead to abstention or an explicit limitation.
+- **Operational controls:** request limits, deadlines, health checks, bounded worker consumption, and metrics are first-class system concerns.
+- **Polyglot where ownership warrants it:** TypeScript/Node, Go, and Python remain separately built and tested toolchains.
+
+## 4. Technology map
+
+| Layer | Current implementation |
+|---|---|
+| Web | React 19, Vite, NGINX |
+| Mobile | Expo SDK 57, React Native 0.86, TypeScript |
+| Edge routing | Go `net/http` reverse proxy |
+| Collaboration API | Express, Mongoose, Socket.IO, Redis |
+| Domain API | NestJS, GraphQL, REST, Prisma |
+| Async job API/worker | Go, Gin, RabbitMQ, Redis |
+| AI service | Python, FastAPI, SQLAlchemy async, Alembic, PostgreSQL/pgvector |
+| Persistence | MongoDB, PostgreSQL, Redis, RabbitMQ, S3-compatible storage |
+| Observability | Prometheus, Grafana, Blackbox Exporter, cAdvisor |
+| Infrastructure | Docker Compose, Kustomize, Terraform templates |
+
+## 5. What is implemented vs what must be proven
+
+The repository contains working code, tests, Compose assembly, CI workflows, and AWS/Kubernetes templates. It does not by itself prove a live production deployment, contracted uptime, audited security certification, production incident coverage, measured scale, or tested disaster recovery. Those require environment-specific evidence.
+
+## 6. Reading paths
+
+- **Engineering leaders:** [Enterprise dossier](docs/enterprise-technical-dossier.md), [technical due diligence](docs/governance/technical-due-diligence.md), [architecture](docs/architecture.md).
+- **Technical recruiters:** [engineering portfolio](docs/engineering-portfolio.md), [platform capabilities](docs/platform-capabilities.md), [service catalogue](docs/architecture/service-catalog.md).
+- **Developers:** [repository layout](docs/repository-layout.md), [engineering standards](docs/engineering-standards.md), [testing strategy](docs/testing-strategy.md).
+- **Operations/security:** [production guide](docs/production-guide.md), [observability](docs/observability.md), [security](docs/security-and-operations.md), [readiness gates](docs/production-readiness-gates.md).

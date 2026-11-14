@@ -1,34 +1,55 @@
 # Relay Performance Test Contract
 
-## Objective
+## 1. Objective
 
-Performance tests quantify service behavior under a defined workload. Every result must be reproducible and tied to a commit, environment, configuration, and dataset.
+Performance tests quantify the behavior of a defined build in a defined environment under a reproducible workload. This directory currently documents the expected scenario and reporting contract; it should not be presented as evidence that a complete load-test suite or baseline has already been implemented.
 
-## Scenario matrix
+## 2. Scenario matrix
 
 Include representative workloads for:
+
 - authentication and session validation;
 - message send/read and conversation history pagination;
 - GraphQL conversation/task/call operations;
-- Socket.IO connection and event delivery;
-- job submission, queue throughput, and worker recovery;
-- document ingestion, semantic retrieval, and grounded answer generation;
-- multi-agent task execution;
-- recording upload completion and asynchronous processing.
+- Socket.IO connection churn, concurrent connections, and message fan-out;
+- job submission, queue throughput, retry, and worker recovery;
+- document ingestion and hybrid retrieval across realistic corpus sizes;
+- AI answer generation at representative prompt/context sizes;
+- recording upload, storage, and worker processing;
+- concurrent user traffic with background workers active.
 
-## Required report fields
+Each scenario should include normal, peak, burst, and degraded-dependency cases. Include provider rate limits, database latency, broker reconnect, object-store delay, and worker restarts where relevant.
 
-- commit SHA and artifact versions;
-- test environment and topology;
-- request mix, concurrency, duration, and data volume;
-- warm-up and measurement windows;
-- throughput and p50/p95/p99 latency;
-- HTTP error and timeout rate;
-- CPU, memory, network, and database utilization;
-- queue depth, oldest message age, worker count, and completion rate;
-- model/provider name, token budget, and provider latency for AI scenarios;
-- test tool, scripts, and raw result artifacts.
+## 3. Required workload definition
 
-## Method
+| Field | Description |
+|---|---|
+| Scenario owner | engineer responsible for validity and follow-up |
+| Build identity | commit SHA, image digest, dependency lockfile |
+| Environment | instance type, CPU/memory, network, storage, topology |
+| Dataset | size, shape, generation method, privacy controls |
+| Arrival model | closed/open model, request rate, concurrency, ramp-up |
+| Duration | warm-up, steady state, cool-down, repetitions |
+| Mix | operation distribution and user think time |
+| Success criteria | latency percentiles, errors, throughput, resource ceiling |
+| Failure scenarios | fault injected, expected user impact, recovery criterion |
 
-Run baseline and candidate under the same workload and environment. Change one variable at a time. Separate cold-start, warm-cache, and steady-state behavior. Do not infer production capacity from a local developer machine.
+## 4. Metrics to report
+
+- throughput and successful completions;
+- p50/p90/p95/p99 latency;
+- timeout, retry, and failure rates;
+- CPU, memory, network, disk, and process limits;
+- DB connection pool wait, query duration, and saturation;
+- queue depth, oldest-message age, consumer throughput, and DLQ;
+- AI embedding/generation time, token usage, empty retrieval, citation validity, and abstention;
+- recording upload and processing duration;
+- cost per operation where resource/provider billing data is available.
+
+## 5. Test integrity
+
+Do not compare results across incompatible hardware, dataset size, cache state, model/provider versions, or workload mix without explicit normalization. Run enough repetitions to understand variance. Preserve scripts, raw results, and environment metadata. Keep synthetic user data and credentials isolated.
+
+## 6. Interpretation
+
+A performance report must identify the bottleneck, measured evidence, confidence/variance, user impact, and next experiment. A local laptop run is useful for regression direction but is not a production capacity guarantee. Establish organization-approved thresholds before making SLO or capacity claims.

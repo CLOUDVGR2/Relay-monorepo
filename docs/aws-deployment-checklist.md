@@ -1,51 +1,116 @@
 # AWS Deployment Engineering Checklist
 
-## Account and regional foundation
+This checklist is an execution aid for a reviewed deployment. The existence of Terraform/Kustomize files is not a deployment approval. Mark each item only when evidence is attached to the change or release record.
 
-- Confirm AWS account ID, Region, EKS cluster name, VPC/subnet selection, and resource naming.
-- Establish IAM boundaries for Terraform, CI publication, EKS workloads, and human operators.
-- Define environment tags, budget alerts, log retention, and resource ownership.
+## 1. Account, region, and governance
 
-## Container registry
+- [ ] Confirm AWS account ID, region, EKS cluster name, environment, and naming convention.
+- [ ] Confirm cost center, resource owner tags, budget alarms, and chargeback policy.
+- [ ] Establish separate human, CI, Terraform, cluster, and workload identities.
+- [ ] Review SCPs, permission boundaries, break-glass access, CloudTrail, and audit retention.
+- [ ] Select data-residency and retention requirements with security/legal owners.
 
-Terraform defines ECR repositories for frontend, backend, API gateway, Go API/worker, NestJS API, Python AI, recording worker, Redis, RabbitMQ, MongoDB, and PostgreSQL. Review repository lifecycle, immutable tag policy, scanning, encryption, and image retention before use.
+## 2. Terraform foundation
 
-## EKS and workload identity
+- [ ] Pin Terraform and provider versions; initialize from the approved lock file.
+- [ ] Configure a remote, encrypted, access-controlled state backend with locking.
+- [ ] Review all `create_*` feature flags and their costs.
+- [ ] Validate VPC CIDRs, non-overlapping public/private subnets, and AZ count.
+- [ ] Decide NAT gateway topology and VPC endpoints; model ongoing costs.
+- [ ] Review EKS cluster endpoint access, node groups, version, encryption, and upgrade policy.
+- [ ] Run `terraform fmt -check -recursive`, `terraform validate`, and the configured tests.
+- [ ] Produce and review a saved plan; verify intended create/update/destroy actions.
+- [ ] Obtain change approval before apply.
 
-- Install the EKS Pod Identity Agent and required CSI drivers.
-- Configure service accounts and Pod Identity associations.
-- Apply least-privilege policies for recording object storage, External Secrets, and load-balancer management.
-- Confirm namespace and service-account names match the trust policy conditions.
+## 3. Container registry and supply chain
 
-## Secrets
+Terraform defines ECR repository resources for application and selected supporting services. Review the current `main.tf` repository set before use.
 
-External Secrets Operator resources describe synchronization from AWS Secrets Manager. Confirm the secret naming convention, IAM resource scope, SecretStore identity, target Kubernetes Secret names, and refresh policy. Never store plaintext secret values in Terraform variables committed to source.
+- [ ] Publish each required image to the target account and region.
+- [ ] Use immutable release tags or digests; prohibit `latest` for controlled production releases.
+- [ ] Enable scanning, encryption, lifecycle rules, and image retention.
+- [ ] Retain SBOM/provenance and map each image to a source commit.
+- [ ] Verify architecture compatibility and startup/healthcheck behavior.
+- [ ] Confirm image pull identity and registry/network access.
 
-## Storage
+## 4. EKS and workload identity
 
-The Terraform module can define a private S3 recording bucket with public access blocked and server-side encryption enabled. Validate lifecycle/retention, versioning, KMS requirements, object ownership, access logging, and recovery before production use. The AWS overlay includes EBS-backed storage configuration for stateful components; validate storage class, topology, and backup policy.
+- [ ] Confirm control-plane and node security posture.
+- [ ] Apply namespace, RBAC, service accounts, Pod Security standards, and network policies.
+- [ ] Configure EKS Pod Identity or another approved workload identity mechanism.
+- [ ] Validate trust policies bind account, cluster, namespace, and service account as intended.
+- [ ] Ensure no long-lived cloud access keys are embedded in workloads.
+- [ ] Define node disruption, upgrades, autoscaling, and capacity buffers.
 
-## Networking and ingress
+## 5. Secrets Manager and External Secrets
 
-- Configure AWS Load Balancer Controller and its IAM role.
-- Provide domain records and ACM certificate ARN.
-- Validate ingress path rules, target health checks, TLS policy, and security groups.
-- Restrict database and broker access to application workloads.
-- Verify external API routes match the gateway allowlist.
+- [ ] Install a supported External Secrets Operator version.
+- [ ] Configure the SecretStore region, identity, and namespace.
+- [ ] Confirm remote secret names and expected key names for each service.
+- [ ] Validate refresh interval, ownership, deletion policy, and failure alerts.
+- [ ] Confirm secrets appear only in the intended namespace and workloads.
+- [ ] Test rotation and consumer reload behavior.
+- [ ] Audit secret read permissions and CloudTrail events.
 
-## Application release
+## 6. Ingress and edge security
 
-- Build and publish images for the selected architecture.
-- Configure image repositories/tags and runtime environment.
-- Apply Kustomize AWS overlay.
-- Verify rollout status, readiness, logs, metrics, and service discovery.
-- Exercise authentication, messaging, calls, tasks, AI retrieval, and worker flows.
+- [ ] Install and version the AWS Load Balancer Controller.
+- [ ] Select internet-facing vs internal ALB deliberately.
+- [ ] Attach approved TLS certificates and security policy.
+- [ ] Validate path routing, redirects, SPA fallback, and API prefix behavior.
+- [ ] Test Socket.IO/WebSocket upgrade, idle timeout, and drain behavior.
+- [ ] Configure WAF/rate protections where required by threat review.
+- [ ] Restrict metrics, internal health, docs, AI, broker, database, and worker endpoints.
+- [ ] Review Gateway trusted-proxy configuration and forwarding headers.
 
-## Data protection and operations
+## 7. Persistence and data services
 
-- Define database backup, point-in-time recovery, object retention, and restore validation.
-- Configure Prometheus scraping and alerting for the deployed topology.
-- Establish incident ownership, credential rotation, and rollback procedures.
-- Capture actual deployment evidence and resource inventory.
+- [ ] Decide which repositories' MongoDB/PostgreSQL/Redis/RabbitMQ deployments remain in-cluster and which move to managed services.
+- [ ] Confirm storage class, encryption, volume binding, expansion, snapshots, and multi-AZ behavior.
+- [ ] Validate PostgreSQL extensions and version compatibility (`pgvector` is used by RAG).
+- [ ] Confirm MongoDB replica/backup strategy and authentication.
+- [ ] Define Redis persistence/failover consistent with its cache, coordination, and status roles.
+- [ ] Define RabbitMQ durable topology, quorum/replication, disk alarm, and recovery.
+- [ ] Test backups and restore into a clean environment.
 
-Terraform and Kubernetes manifests define deployment intent. They do not create AWS resources until an authorized operator initializes, plans, reviews, and applies them in the target account.
+## 8. Recording object storage
+
+- [ ] Confirm unique bucket name and region.
+- [ ] Enable encryption, public-access blocking, bucket policy, and versioning if required.
+- [ ] Restrict object operations to intended Nest/recording worker roles.
+- [ ] Configure retention, lifecycle, legal hold, deletion, and cross-region strategy if required.
+- [ ] Test upload, completion, processing, and denied unauthorized object access.
+
+## 9. Application configuration
+
+- [ ] Set public client origins and API base URLs.
+- [ ] Configure auth/session secrets and allowed origins.
+- [ ] Configure service-to-service internal tokens independently from user JWTs.
+- [ ] Set database, cache, broker, and object-store endpoints.
+- [ ] Set AI generation and embedding provider/model/limits explicitly.
+- [ ] Verify cross-user Knowledge Base sharing has been approved and disclosed.
+- [ ] Validate all health/readiness endpoints and dependency ordering.
+
+## 10. Observability and operations
+
+- [ ] Install metrics collection and secure dashboards.
+- [ ] Configure logs, redaction, retention, and correlation.
+- [ ] Validate probes, alerts, and escalation delivery.
+- [ ] Set service-specific SLOs and queue-age thresholds.
+- [ ] Test incident response and recovery runbooks.
+- [ ] Verify capacity under representative load and failure conditions.
+
+## 11. Final release acceptance
+
+- [ ] Render and review the exact AWS overlay.
+- [ ] Run Kubernetes schema and policy validation.
+- [ ] Record manifest digest, image digests, source commit, and migration versions.
+- [ ] Run smoke tests for auth, messaging, realtime, calls, tasks, jobs, recording, AI, and web/mobile entrypoints as applicable.
+- [ ] Complete security, privacy, performance, DR, and go/no-go reviews.
+- [ ] Record operator, deployment window, rollback owner, and approval.
+
+## Related documents
+
+- [AWS deployment architecture](architecture/aws-deployment.md)
+- [AWS overlay](../infrastructure/kubernetes/overlays/aws/README.md)
+- [Production readiness gates](production-readiness-gates.md)

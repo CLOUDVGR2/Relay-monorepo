@@ -1,60 +1,91 @@
 # Relay Technical Documentation
 
-This documentation set describes the platform as an engineering system: product capabilities, runtime architecture, API contracts, data boundaries, security controls, delivery topology, and operational practices.
+This documentation set is the engineering reference for the Relay monorepo. It is written for engineers building and operating the platform, architecture and security reviewers, engineering leaders, hiring managers, and technical recruiters.
 
-## Portfolio and product experience
+## Start here
 
-- [Engineering portfolio case study](engineering-portfolio.md) — hiring-manager overview of technical scope and engineering disciplines.
-- [Product and experience architecture](product-experience.md) — information architecture, design system, accessibility, and interaction model.
-- [Data architecture](data-architecture.md) — persistence ownership, tenant boundaries, and cross-store workflows.
-- [Observability architecture](observability.md) — logs, metrics, health semantics, and operational signals.
-- [Testing strategy](testing-strategy.md) — unit, integration, contract, E2E, infrastructure, and performance coverage.
+| Reader | Recommended path |
+|---|---|
+| Executive / engineering leader | [Enterprise Technical Dossier](enterprise-technical-dossier.md) → [Architecture](architecture.md) → [Engineering Portfolio](engineering-portfolio.md) → [Production Readiness](production-readiness-gates.md) |
+| Staff/principal engineer | [Architecture](architecture.md) → [Service Catalog](architecture/service-catalog.md) → [Data Architecture](data-architecture.md) → [Security Threat Model](security/threat-model.md) → [Reliability](reliability/slo-and-error-budgets.md) |
+| Backend engineer | [API Reference](ai-api-reference.md) → service README → [Data Architecture](data-architecture.md) → [Testing Strategy](testing-strategy.md) |
+| AI / ML engineer | [AI Knowledge Base](ai-knowledge-base.md) → [AI API Reference](ai-api-reference.md) → [AI Platform Operations](ai-platform-operations.md) → [AI User Guide](ai-user-guide.md) |
+| Mobile engineer | [Mobile Architecture](mobile-architecture.md) → [`apps/mobile/README.md`](../apps/mobile/README.md) → [Product Experience](product-experience.md) |
+| Platform / SRE engineer | [Production Guide](production-guide.md) → [Observability](observability.md) → [Incident Response](operations/incident-response.md) → [Backup and DR](operations/backup-and-disaster-recovery.md) |
+| Security reviewer | [Threat Model](security/threat-model.md) → [Security and Operations](security-and-operations.md) → [`SECURITY.md`](../SECURITY.md) |
+| Technical recruiter | [Engineering Portfolio](engineering-portfolio.md) → [Platform Capabilities](platform-capabilities.md) → [Repository Layout](repository-layout.md) |
 
-## Architecture and platform design
+## Architecture and design
 
-- [System architecture](architecture.md) — service topology, runtime responsibilities, request paths, asynchronous processing, and data boundaries.
-- [Platform capabilities](platform-capabilities.md) — implementation inventory organized by product domain.
-- [Repository layout](repository-layout.md) — canonical source map and workspace boundaries.
-- [Architecture decision records](decisions/README.md) — recorded architectural choices.
+- [Enterprise Technical Dossier](enterprise-technical-dossier.md) — integrated platform, evidence boundaries, due-diligence checklist, and interview guide.
+- [System Architecture](architecture.md) — context, containers, ingress, trust boundaries, request flows, and design trade-offs.
+- [Service Catalog](architecture/service-catalog.md) — service-by-service ownership and operational interface.
+- [Request and Event Flows](architecture/request-flows.md) — detailed sequence diagrams for web/mobile, AI, calls/recordings, jobs, and workers.
+- [Data Architecture](data-architecture.md) — persistence ownership, relational constraints, tenant context, and cross-store consistency.
+- [Repository Layout](repository-layout.md) — source tree, build-system boundaries, and ownership map.
+- [Architecture Decision Records](decisions/README.md) — accepted historical decisions and how to add new records.
 
-## Client applications
+## Product and engineering portfolio
 
-- [Web application](../apps/web/README.md) — React application structure, state, routing, and UI system.
-- [Mobile architecture](mobile-architecture.md) — Expo runtime, authenticated networking, realtime transport, calls, and local data.
-- [Mobile implementation guide](../apps/mobile/README.md) — configuration, build, and verification.
+- [Platform Capabilities](platform-capabilities.md) — capability/evidence matrix with implementation and maturity boundaries.
+- [Product Experience](product-experience.md) — web/mobile information architecture, interaction patterns, and accessibility expectations.
+- [Mobile Architecture](mobile-architecture.md) — native networking, realtime, calls, recording and local state.
+- [Engineering Portfolio](engineering-portfolio.md) — evidence-led case study for hiring managers and recruiters.
+- [Technical Due Diligence](governance/technical-due-diligence.md) — reviewer checklist and evidence request set.
 
 ## APIs and AI
 
-- [API and AI reference](ai-api-reference.md) — public gateway routes and AI service contracts.
-- [AI knowledge architecture](ai-knowledge-base.md) — ingestion, embeddings, retrieval, tenant context, and grounded generation.
-- [AI user guide](ai-user-guide.md) — user-facing interaction patterns and citation semantics.
-- [Python AI service](../services/ai-service/README.md) — FastAPI modules and execution models.
-- [Express API](../services/express-api/README.md) — authentication, messaging, notifications, and Socket.IO.
-- [NestJS API](../services/nest-api/README.md) — GraphQL, REST, calls, tasks, and recording workflows.
-- [Go API gateway](../services/api-gateway/README.md) — reverse-proxy routing and request policy.
-- [Jobs API](../services/jobs-api/README.md) and [Jobs worker](../services/jobs-worker/README.md) — queue contracts and asynchronous processing.
+- [API and AI Reference](ai-api-reference.md) — route ownership and public/internal distinction.
+- [AI Knowledge Base](ai-knowledge-base.md) — ingestion, embeddings, hybrid retrieval, answers, tenant boundaries and quality safeguards.
+- [AI Platform Operations](ai-platform-operations.md) — provider configuration, workers, diagnostics, and failure isolation.
+- [AI User Guide](ai-user-guide.md) — behavior and responsible-use guidance.
 
-## Security, reliability, and operations
+## Security, reliability and operations
 
-- [Threat model](security/threat-model.md)
-- [Security and operations](security-and-operations.md)
-- [Reliability objectives](reliability/slo-and-error-budgets.md)
-- [Performance engineering](performance/resource-efficiency.md)
-- [Backup and recovery](operations/backup-and-disaster-recovery.md)
-- [Incident operations](operations/incident-response.md)
-- [Release engineering](production-guide.md)
-- [Release acceptance gates](production-readiness-gates.md)
+- [Engineering Standards](engineering-standards.md)
+- [Code Commenting Standard](code-commenting-standard.md)
+- [Security and Operations](security-and-operations.md)
+- [Threat Model](security/threat-model.md)
+- [Observability](observability.md)
+- [SLO and Error Budgets](reliability/slo-and-error-budgets.md)
+- [Incident Response](operations/incident-response.md)
+- [Backup and Disaster Recovery](operations/backup-and-disaster-recovery.md)
+- [Performance and Resource Efficiency](performance/resource-efficiency.md)
+- [Testing Strategy](testing-strategy.md)
 
-## Infrastructure and delivery
+## Delivery and deployment
 
-- [AWS deployment architecture](architecture/aws-deployment.md)
-- [AWS deployment checklist](aws-deployment-checklist.md)
-- [Kubernetes AWS overlay](../infrastructure/kubernetes/overlays/aws/README.md)
-- [External Secrets Operator integration](../infrastructure/kubernetes/infra/external-secrets/README.md)
+- [Production Guide](production-guide.md)
+- [Production Readiness Gates](production-readiness-gates.md)
+- [AWS Deployment Architecture](architecture/aws-deployment.md)
+- [AWS Deployment Checklist](aws-deployment-checklist.md)
+- [External Secrets Operator Integration](../infrastructure/kubernetes/infra/external-secrets/README.md)
+- [AWS Kubernetes Overlay](../infrastructure/kubernetes/overlays/aws/README.md)
 
-## Engineering standards
+## Service documentation
 
-- [Engineering standards](engineering-standards.md)
-- [Code commenting standard](code-commenting-standard.md)
-- [Performance test contract](../tests/performance/README.md)
-- [Contributing handbook](../CONTRIBUTING.md)
+| Service/client | Reference |
+|---|---|
+| Web | [`apps/web/README.md`](../apps/web/README.md) |
+| Mobile | [`apps/mobile/README.md`](../apps/mobile/README.md) |
+| Go API Gateway | [`services/api-gateway/README.md`](../services/api-gateway/README.md) |
+| Express API | [`services/express-api/README.md`](../services/express-api/README.md) |
+| NestJS API | [`services/nest-api/README.md`](../services/nest-api/README.md) |
+| Go Jobs API | [`services/jobs-api/README.md`](../services/jobs-api/README.md) |
+| Go Jobs Worker | [`services/jobs-worker/README.md`](../services/jobs-worker/README.md) |
+| Python AI Service | [`services/ai-service/README.md`](../services/ai-service/README.md) |
+| Performance test contract | [`tests/performance/README.md`](../tests/performance/README.md) |
+
+## Documentation governance
+
+The source tree, route registrations, data models, environment validation, Dockerfiles, Compose configuration, Kubernetes manifests, and generated API schemas are authoritative. Documentation may explain intent and integration, but must not silently override executable behavior.
+
+Every material claim should be classed as one of:
+
+- **Source-confirmed:** directly visible in implementation or configuration.
+- **Test-confirmed:** exercised by a named automated test.
+- **Deployment-described:** represented in infrastructure assets.
+- **Environment-verified:** observed in a named target environment and release.
+- **Proposed:** a recommendation that has not yet been implemented.
+
+Numerical SLOs, capacity claims, certification statements, and production deployment claims require dated supporting evidence. Do not copy example values into external collateral as measured outcomes.

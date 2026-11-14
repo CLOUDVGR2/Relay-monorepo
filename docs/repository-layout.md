@@ -1,46 +1,69 @@
-# Repository Structure and Ownership
+# Repository Structure, Ownership, and Navigation
 
-## Workspace organization
+Relay is a polyglot monorepo: JavaScript/TypeScript projects share a pnpm workspace, while Go and Python services retain independent toolchains. The repository is the integration boundary, not a single deployable process.
 
-Relay uses a pnpm workspace for JavaScript/TypeScript packages and independent native toolchains for Go and Python services.
+## 1. Top-level map
 
-| Path | Ownership | Key artifacts |
+| Path | Responsibility | Primary owners / changes |
 |---|---|---|
-| `apps/web/` | Browser UI | React pages/components, state stores, styles, Vite, Vitest, Playwright |
-| `apps/mobile/` | Native UI | Expo config, React Native screens, hooks, API/realtime libraries, native build config |
-| `services/api-gateway/` | Edge application routing | Go server, proxy policy, config, metrics, tests |
-| `services/express-api/` | Collaboration API | Express routes/controllers, models, auth, Socket.IO, Redis, metrics |
-| `services/nest-api/` | Domain API | Nest modules, GraphQL resolvers, REST controllers, DTOs, Prisma/Mongoose |
-| `services/jobs-api/` | Job HTTP contract | Gin routes, publisher, Redis status, OpenAPI |
-| `services/jobs-worker/` | Queue execution | AMQP consumer, handler, retries, idempotency, heartbeat |
-| `services/ai-service/` | AI and automation | FastAPI routes, RAG, agent workflows, migrations, recording and multi-agent workers |
-| `infrastructure/` | Delivery and runtime | Terraform, Kustomize, Dockerfiles, Jenkins |
-| `monitoring/` | Telemetry provisioning | Prometheus, Blackbox Exporter, Grafana datasource |
-| `tests/` | Cross-component validation | Integration, E2E, and performance test contracts |
-| `docs/` | Engineering knowledge | Architecture, API, security, reliability, operations, ADRs |
+| `apps/web/` | React/Vite browser application and NGINX runtime | Web product, accessibility, browser API integration |
+| `apps/mobile/` | Expo / React Native native client | Mobile experience, device permissions, media and native lifecycle |
+| `services/api-gateway/` | Go edge proxy and public route allowlist | Routing, trusted proxy, transport limits, gateway metrics |
+| `services/express-api/` | Express collaboration API and Socket.IO | Authenticated collaboration routes, user model, notifications, AI adapter |
+| `services/nest-api/` | NestJS domain API, REST, GraphQL, Prisma | Conversations, tasks, calls, recording lifecycle, AI and jobs facade |
+| `services/jobs-api/` | Go HTTP job publisher/status API | Job submission contract, broker publishing, status/health endpoints |
+| `services/jobs-worker/` | Go RabbitMQ consumer | Job execution, idempotency, retry, heartbeat, recovery |
+| `services/ai-service/` | Python FastAPI AI/RAG/agent operations | Document ingestion/retrieval, answer generation, agent workflows, migrations |
+| `services/ai-service/migrations/` | Alembic migration history | Python service schema evolution |
+| `infrastructure/aws/` | Terraform and IAM policy templates | AWS foundation, registry, identity, recording storage |
+| `infrastructure/kubernetes/` | Kustomize base and overlays | Kubernetes workload composition and environment patches |
+| `infrastructure/deploy/` | deployment/render helpers and Docker assets | artifact/config rendering |
+| `infrastructure/devops/` | Jenkins assets | optional/legacy pipeline integration; verify whether used |
+| `monitoring/` | Prometheus and Blackbox configuration | scrape targets and probes |
+| `tests/` | integration, end-to-end, and performance test contracts | cross-service quality |
+| `.github/workflows/` | GitHub Actions workflows | CI, security, publishing, infrastructure validation |
+| `docs/` | architecture, operations, product, security, decision records | shared system of record for engineering knowledge |
 
-## Build-system boundaries
+## 2. Toolchain boundaries
 
-- Root `package.json` provides workspace scripts and aggregate commands.
-- `pnpm-workspace.yaml` declares package discovery.
-- `pnpm-lock.yaml` is the dependency-resolution source for pnpm packages.
-- Each Go service owns its `go.mod` and `go.sum`.
-- The Python AI service owns runtime/development requirements, pytest configuration, and Alembic migrations.
-- Dockerfiles define container build contexts and runtime entrypoints.
-- Kustomize overlays compose environment-specific Kubernetes resources.
+| Runtime | Dependency / build root | Typical test command |
+|---|---|---|
+| Workspace Node/TypeScript | root `package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml` | `pnpm run test:all` or package-specific test |
+| Web | `apps/web/package.json` | `pnpm --filter @relay/web run test` |
+| Mobile | `apps/mobile/package.json` | `pnpm --filter @relay/mobile run typecheck` plus device/emulator testing |
+| Express | `services/express-api/package.json` | `pnpm --filter @relay/express-api run test:integration` |
+| NestJS | `services/nest-api/package.json` | `pnpm --filter @relay/nest-api run test` |
+| Go Gateway | `services/api-gateway/go.mod` | `(cd services/api-gateway && go test ./...)` |
+| Go Jobs API | `services/jobs-api/go.mod` | `(cd services/jobs-api && go test ./...)` |
+| Go Worker | `services/jobs-worker/go.mod` | `(cd services/jobs-worker && go test ./...)` |
+| Python AI | `services/ai-service/requirements*.txt`, `alembic.ini` | `.venv/bin/python -m pytest tests/` from service root |
 
-## Configuration ownership
+Do not assume a root pnpm command installs Go or Python dependencies. Pin and validate each toolchain independently.
 
-The root `.env.example` documents shared local configuration. Service-level examples and manifests may define additional variables. The consuming service's config parser and deployment manifest are authoritative for variable names, defaults, and validation.
+## 3. Key navigation paths
 
-## Repository navigation
+- Start with [the platform dossier](enterprise-technical-dossier.md) for architecture and hiring-manager review.
+- Use [architecture](architecture.md), [service catalogue](architecture/service-catalog.md), and [request flows](architecture/request-flows.md) for system boundaries.
+- Use [API reference](ai-api-reference.md) and the service READMEs for endpoint-specific behavior.
+- Use [data architecture](data-architecture.md) for persistence ownership and data flows.
+- Use [security and operations](security-and-operations.md) and the threat model for trust boundaries.
+- Use [production guide](production-guide.md), [readiness gates](production-readiness-gates.md), and [incident response](operations/incident-response.md) for operations.
+- Use [ADRs](decisions/README.md) for durable historical design decisions.
 
-Start at the service boundary, then trace:
-1. public route or GraphQL resolver;
-2. DTO/schema validation;
-3. service/business logic;
-4. repository/model or external adapter;
-5. tests;
-6. container and deployment configuration.
+## 4. Change ownership and impact analysis
 
-This sequence exposes the contract from ingress through persistence and runtime packaging.
+Before changing a boundary, identify:
+
+1. source owner and public contract;
+2. gateway/frontend/mobile consumers;
+3. persistence model and migration path;
+4. authentication and authorization path;
+5. async events and workers;
+6. telemetry and runbook impact;
+7. tests and rollout compatibility.
+
+A cross-service feature generally requires contract tests and documentation updates in the same pull request. Do not place business logic in the Gateway; do not bypass domain service authorization by calling an internal service from a client.
+
+## 5. Documentation maintenance
+
+Documentation is part of the change contract. Update route tables when routes change, data-flow diagrams when ownership changes, deployment guides when manifest semantics change, and ADRs when a durable architectural choice is introduced or superseded.

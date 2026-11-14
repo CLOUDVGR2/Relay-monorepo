@@ -1,67 +1,103 @@
 # Relay Product and Experience Architecture
 
-## Experience model
+## 1. Experience model
 
-Relay presents collaboration and operational intelligence through two client experiences:
-- a React browser application optimized for workspace navigation, messaging, AI interaction, and operational views;
-- an Expo / React Native application designed for native access to collaboration, calls, tasks, notifications, and AI assistance.
+Relay presents a shared collaboration and operations workspace through a React browser application and an Expo/React Native mobile application. The clients reuse server-owned APIs and identity while adapting navigation, local state, and media behavior to each runtime.
 
-The experiences share server-owned domain contracts while adapting interaction patterns to browser and mobile platform conventions.
-
-## Information architecture
+## 2. Information architecture
 
 ### Collaboration
-Authentication, user discovery, conversations, message history, realtime updates, and notification preferences form the primary collaboration surface.
 
-### Work
-Tasks, checklists, task links, job history, and asynchronous workflow progress support user work coordination.
+- Authentication and profile flows.
+- User discovery and conversation selection.
+- Message history, composition, read state and edits.
+- Realtime connection state and notifications.
+
+### Calls and communication
+
+- Call lifecycle and participant actions.
+- Native media/recording integration.
+- Consent and upload status reflected from the backend.
+- Recording recovery and processing status separate from the call-end action.
+
+### Work management
+
+- Task creation/list/update and checklist interactions.
+- Task links and related activity.
+- Job submission/history as a distinct asynchronous domain.
 
 ### Intelligence
-The AI assistant, document knowledge, conversation analysis, incident intelligence, and multi-agent task views expose model-assisted workflows as distinct product capabilities.
+
+- AI assistant and document-backed questions.
+- Incident response/intelligence surfaces.
+- Conversation analysis and multi-agent task progress.
+- Uploader attribution on cross-user Knowledge Base answers.
 
 ### Operations
-The web workspace organizes platform overview, intelligence, AI runs, infrastructure, jobs/workflows, analytics, and knowledge. Operational interfaces distinguish health signals, workflow state, and analytical summaries.
 
-## Web design system
+- Analytics, infrastructure and operational workspace pages.
+- Execution history, service readiness and metrics views where configured.
 
-The web application uses shared primitives in `apps/web/src/components/ui/`, design tokens in `src/styles/tokens.css`, and global accessibility behavior in `src/styles/accessibility.css`.
+The existence of a page does not imply that every operational metric is backed by a production telemetry pipeline. Check its API and state source.
 
-The shared component set includes buttons, inputs, cards, badges, and supporting UI primitives. Components expose consistent variants, loading states, labels, helper text, error descriptions, and semantic container options.
+## 3. Web application architecture
 
-Design tokens centralize spacing, radii, focus-ring treatment, and transition timing. DaisyUI/Tailwind provide the styling foundation and theme system.
+`apps/web/src/App.jsx` composes routing and application shell. `src/pages/` contains experience pages; `src/components/` contains collaboration and operational components; `src/store/` contains authentication, theme and chat state; `src/lib/` contains shared client utilities; `src/styles/` and `src/index.css` define tokens and accessibility rules.
 
-## Accessibility and interaction quality
+The production Dockerfile builds Vite assets and serves them from NGINX. NGINX serves the SPA fallback and forwards configured routes to the Go Gateway or selected diagnostic endpoints. The API contract remains owned by Express/Nest, not by the SPA.
 
-The codebase includes:
-- visible keyboard focus styles;
-- skip-link and visually-hidden utilities;
-- touch-target sizing with coarse-pointer behavior;
-- reduced-motion preferences;
-- responsive overflow safeguards;
-- semantic labels and described-by relationships in form controls;
-- loading and disabled states in shared buttons.
+### Interaction-state expectations
 
-These are implementation foundations intended to support accessible interaction. Conformance claims require automated and manual testing across representative pages, assistive technologies, and input modes.
+Every async surface should have explicit idle/loading/success/empty/error behavior. Mutations should prevent duplicate submissions where appropriate, preserve actionable error context without leaking internals, and reconcile state with server responses. Realtime UI should distinguish disconnected/reconnecting states from an empty conversation.
 
-## Mobile interaction architecture
+## 4. Mobile application architecture
 
-Native screens are separated by domain. Shared screen/UI components and navigation types provide consistent structure. The call experience uses a dedicated media hook and incoming-call overlay; network and realtime clients are centralized to avoid duplicating authentication and connection policy across screens.
+`apps/mobile/src/screens/` contains the primary product screens. `src/lib/api.ts` centralizes HTTP and token behavior; `graphql.ts` and `realtime.ts` own their respective transports. Call media, audio recording, upload and recovery live in dedicated hooks/libraries. The offline message cache is a bounded local data concern rather than a replacement for server persistence.
 
-Native interaction design must account for permission prompts, app foreground/background transitions, network changes, audio focus, device-specific WebRTC behavior, and recoverable upload state.
+Native UI must account for keyboard, permission, foreground/background, connectivity, device storage and audio-session lifecycle. Physical-device tests are necessary for camera/microphone permissions, WebRTC/media route behavior, push token registration and recording recovery.
 
-## UX state model
+## 5. Design-system responsibilities
 
-Interactive screens should model at least:
-- initial/loading state;
-- populated state;
-- empty state;
-- validation state;
-- recoverable network/dependency error;
-- authorization/session-expired state;
-- asynchronous in-progress and completed states.
+- Reuse existing components and theme tokens.
+- Keep typography, spacing, colors and interaction affordances consistent.
+- Use semantic controls, accessible labels and live regions for state changes.
+- Make keyboard/focus navigation and reduced-motion preferences part of acceptance criteria.
+- Preserve color contrast in light/dark themes and communicate status with text/icons in addition to color.
+- Prefer responsive layouts and progressive disclosure over dense screens.
 
-For long-running AI, upload, and job operations, expose durable progress and status rather than relying on a single transient request lifecycle.
+## 6. Accessibility and inclusive interaction
 
-## Design-system evolution
+Accessibility is an engineering contract, not a visual polish phase. Validate:
 
-New UI should reuse tokens and primitives, preserve keyboard/touch accessibility, support responsive layouts, and include component tests. Product-level changes should be validated in the context of navigation, loading behavior, error recovery, and real API contracts.
+- accessible names/roles for controls;
+- predictable focus order and visible focus;
+- keyboard-only operation on web;
+- VoiceOver/TalkBack labels and announcements on mobile;
+- readable error and validation messages;
+- contrast and text scaling;
+- motion sensitivity and audio-only alternatives where applicable.
+
+A test suite that checks component render and click behavior is useful but does not establish conformance to a WCAG level or mobile accessibility certification.
+
+## 7. AI interaction patterns
+
+The standard AI answer experience should show the user's question, the answer and uploader attribution when returned. Retrieval diagnostics and passage-level evidence are internal/operational material, not the normal user-facing answer presentation. The backend still retains citations for grounding, traceability and support investigation.
+
+The interface should distinguish a missing answer, a retrieval/provider failure, and a model abstention. The absence of a displayed supporting-source card does not mean evidence was not retrieved or validated.
+
+## 8. UX quality gates
+
+| Area | Acceptance questions |
+|---|---|
+| Navigation | Can users identify their current domain and return without losing work? |
+| Feedback | Are loading, success, empty, retry and error states clear? |
+| Form quality | Are constraints explained before submission and validation actionable? |
+| Realtime | Does connection loss/recovery avoid duplicate or stale messages? |
+| Calls | Are permission, consent, media connection, upload and processing states distinct? |
+| AI | Is uncertainty communicated and uploader attribution accurate? |
+| Accessibility | Can keyboard and assistive-technology users complete core workflows? |
+| Performance | Are assets, lists, message history, charts and media operations bounded? |
+
+## 9. Change management
+
+A visual or interaction change should identify affected routes, state stores, API contracts, responsive breakpoints, accessibility impact and regression tests. Reuse design tokens instead of adding one-off CSS values. Cross-client behaviors should be compared explicitly rather than assumed identical.

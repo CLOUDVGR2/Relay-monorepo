@@ -1,42 +1,75 @@
 # Relay Go Jobs Worker
 
-## Responsibility
+**Runtime:** Go
+**Responsibility:** consume RabbitMQ job messages and execute the supported job handlers with reliability controls. It is a background process, not a public HTTP API.
 
-The Go Jobs Worker is a background RabbitMQ consumer. It is not an HTTP service. It processes supported job messages and coordinates state, deduplication, retry, and heartbeat behavior through Redis and RabbitMQ.
+## 1. Processing lifecycle
 
-## Processing lifecycle
+The worker:
 
-1. Establish Redis and RabbitMQ connectivity.
-2. Declare or validate the durable queue topology.
-3. Consume with manual acknowledgement and bounded prefetch.
-4. Decode and validate the job payload.
-5. Acquire idempotency coordination for the job identifier.
-6. Execute the supported job handler.
-7. Persist status and completion marker where applicable.
-8. Acknowledge the delivery only after required processing or confirmed retry/dead-letter publication.
+1. loads validated configuration;
+2. establishes Redis and RabbitMQ connectivity;
+3. declares or validates durable queue topology;
+4. consumes with bounded prefetch and manual acknowledgement;
+5. decodes and validates the job message;
+6. coordinates idempotency/status using Redis;
+7. invokes the supported handler;
+8. acknowledges successful work or applies retry/dead-letter policy;
+9. updates heartbeat and status information;
+10. drains and shuts down gracefully when signaled.
 
-## Queue topology
+The current `job.go` handler set includes the `welcome` job type. Expand the catalog only with a schema, handler, idempotency strategy, retry classification, tests, and operational owner.
 
-The implementation defines the main `go.jobs` queue, delayed retry queues (`go.jobs.retry.*`), and `go.jobs.dlq`. Retry queues use TTL and dead-letter routing back to the main queue. Malformed or exhausted messages are routed to the dead-letter path.
+## 2. Reliability controls
 
-## Redis coordination
+- **Manual acknowledgement:** messages are not acknowledged before the relevant execution outcome is known.
+- **Bounded prefetch:** controls in-flight work and memory pressure.
+- **Idempotency:** repeated delivery must not repeat a non-idempotent effect when a reliable key/record exists.
+- **Retry and DLQ:** transient failures may be retried; poison/permanent failures should reach a diagnosable dead-letter path.
+- **Reconnect:** broker/cache reconnect behavior is tested and bounded.
+- **Heartbeat:** exposes worker activity to the Jobs API/operations plane.
+- **Graceful shutdown:** stop accepting new work, finish or safely release in-flight work, and close dependencies.
 
-Redis stores processing locks, completion markers, job status coordination, and worker heartbeat data. TTLs bound transient coordination records. Status updates are owner-aware when the corresponding status record exists.
+At-least-once delivery is the safe assumption for RabbitMQ consumer designs unless stronger end-to-end guarantees are proven. Idempotency reduces duplicate side effects; it does not turn the queue into a globally exactly-once system.
 
-## Reliability behavior
+## 3. Queue topology
 
-The worker reconnects after RabbitMQ session failures, uses bounded retry delays, confirms retry/dead-letter publication before acknowledging the original delivery, and handles shutdown by stopping consumption and draining work within a deadline.
+The implementation uses the `go.jobs` queue, retry queues named under `go.jobs.retry.*`, and a dead-letter route under `go.jobs.dlq`. Verify exchange, routing key, TTL, delivery mode, and dead-letter policy in the current queue declaration code when operating or changing the topology.
 
-## Job contract
+## 4. Configuration and local testing
 
-The currently implemented job type is `welcome`, with a required non-empty message. Unsupported types and malformed payloads follow the worker's failure policy.
-
-## Development
+Configuration is loaded from the worker's environment and validated at startup. Use Compose for a representative Redis/RabbitMQ test environment.
 
 ```bash
-go test ./...
+cd services/jobs-worker
+go test ./... -count=1
+go test -race ./... -count=1
 go vet ./...
 go build ./...
 ```
 
-Run from `services/jobs-worker/`. Tests cover handlers, topology, reconnect behavior, idempotency, status updates, heartbeat, and shutdown.
+## 5. Operational dashboards and alerts
+
+Track:
+
+- queue depth and oldest message age;
+- ready/unacked counts and consumer count;
+- job success/failure and execution duration by bounded type;
+- retry and DLQ rates;
+- Redis idempotency/status errors;
+- heartbeat age and worker restarts;
+- reconnect and shutdown duration;
+- CPU/memory and concurrency saturation.
+
+Never use job payload content, user identifiers, or full job IDs as Prometheus labels. Put individual identifiers in appropriately protected logs.
+
+## 6. Change checklist
+
+- [ ] Schema/version compatibility with producers.
+- [ ] Handler idempotency and side-effect semantics.
+- [ ] Retryability classification and maximum attempts.
+- [ ] DLQ inspection and replay process.
+- [ ] Bounded concurrency and resource profile.
+- [ ] Failure/reconnect/shutdown tests.
+- [ ] Status and heartbeat observability.
+- [ ] Runbook and supported job catalog updated.
