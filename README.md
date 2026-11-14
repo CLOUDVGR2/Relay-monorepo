@@ -1,4 +1,4 @@
-# Relay — Collaborative Operations Enterprise Software Engineering Platform
+# Relay — Enterprise Collaborative Operations Software Engineering Platform
 
 **Relay** is a multi-client, multi-service software platform that brings together team collaboration, real-time communication, work coordination, AI-assisted knowledge workflows, and operational tooling. It is engineered as a distributed, polyglot monorepo spanning frontend applications, mobile experiences, backend services, API infrastructure, data systems, AI capabilities, cloud infrastructure, and operational engineering.
 
