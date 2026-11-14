@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { ActivityIndicator, FlatList, Image, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, getErrorMessage } from '../lib/api';
 import { readCachedMessages, writeCachedMessages } from '../lib/offline-message-cache';
 import * as Network from 'expo-network';
@@ -36,6 +37,7 @@ export function ConversationScreen({ route, userId }: Props) {
   const { person } = route.params;
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState('');
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
@@ -100,6 +102,7 @@ export function ConversationScreen({ route, userId }: Props) {
   // Reset conversation-specific state before rendering a newly selected peer.
   if (previousScopeKey !== scopeKey) {
     setPreviousScopeKey(scopeKey);
+    setSelectedImage(null);
     setHistoryFailed(false);
     setError('');
     setHasMore(false);
@@ -315,24 +318,81 @@ export function ConversationScreen({ route, userId }: Props) {
     }
   };
 
+  const chooseImage = async () => {
+    if (sending) return;
+
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 0.85,
+        base64: true,
+      });
+
+      if (result.canceled || !result.assets.length) return;
+
+      const asset = result.assets[0];
+      const mimeType = (asset.mimeType ?? 'image/jpeg').toLowerCase();
+      const allowedTypes = [
+        'image/png',
+        'image/jpeg',
+        'image/jpg',
+        'image/webp',
+        'image/gif',
+      ];
+
+      if (!allowedTypes.includes(mimeType)) {
+        setError('Please choose a PNG, JPEG, WebP, or GIF image.');
+        return;
+      }
+
+      if (!asset.base64) {
+        setError('Could not read this image. Please choose another.');
+        return;
+      }
+
+      const estimatedSize = Math.floor(asset.base64.length * 3 / 4);
+      const maxSize = 7 * 1024 * 1024;
+
+      if ((asset.fileSize ?? estimatedSize) > maxSize || estimatedSize > maxSize) {
+        setError('Images must be 7 MB or smaller.');
+        return;
+      }
+
+      setSelectedImage(`data:${mimeType};base64,${asset.base64}`);
+      setError('');
+    } catch (pickerError) {
+      setError(getErrorMessage(pickerError, 'Could not open your photo library.'));
+    }
+  };
+
   const send = async () => {
     const text = draft.trim();
-    if (!text || sending) return;
-    if (text.length > 5000) return setError('Messages must be 5,000 characters or fewer.');
+    const image = selectedImage;
+
+    if ((!text && !image) || sending) return;
+    if (text.length > 5000) {
+      return setError('Messages must be 5,000 characters or fewer.');
+    }
+
     setDraft('');
     stopTyping();
     setError('');
     shouldScrollToEnd.current = true;
     setSending(true);
     Keyboard.dismiss();
+
     try {
       const { data } = await api.post<Message>(`/messages/send/${person._id}`, {
         text,
+        ...(image ? { image } : {}),
         ...(replyTo ? { replyTo: replyTo._id } : {}),
       });
+
       appendUnique(data);
       void writeCachedMessages(userId, person._id, [data]);
       setReplyTo(null);
+      setSelectedImage(null);
     } catch (requestError) {
       setDraft(text);
       setError(getErrorMessage(requestError, 'Message was not sent. Please try again.'));
@@ -393,7 +453,7 @@ export function ConversationScreen({ route, userId }: Props) {
   };
 
   return <Screen>
-    <View style={styles.peer}><Avatar name={person.fullName} size={40} /><View style={styles.peerCopy}><Text style={styles.peerName}>{person.fullName}</Text><Text style={styles.peerEmail}>{person.email}</Text></View></View>
+    <View style={styles.peer}><Avatar name={person.fullName} size={40} profilePic={person.profilePic} /><View style={styles.peerCopy}><Text style={styles.peerName}>{person.fullName}</Text><Text style={styles.peerEmail}>{person.email}</Text></View></View>
     {connectionNotice ? (
       <View accessibilityLiveRegion="polite" style={styles.connectionBanner}>
         <Text style={styles.connectionBannerText}>{connectionNotice}</Text>
@@ -468,6 +528,14 @@ export function ConversationScreen({ route, userId }: Props) {
               </View>
             ) : (
               <>
+                {item.image ? (
+                  <Image
+                    source={{ uri: item.image }}
+                    accessibilityLabel="Message attachment"
+                    resizeMode="contain"
+                    style={styles.messageImage}
+                  />
+                ) : null}
                 {item.text ? <Text style={styles.messageText}>{item.text}</Text> : null}
                 {item.editedAt ? <Text style={styles.editedLabel}>Edited</Text> : null}
               </>
@@ -520,7 +588,60 @@ export function ConversationScreen({ route, userId }: Props) {
         </Pressable>
       </View>
     ) : null}
-    <View style={styles.composer}><TextInput accessibilityLabel="Message" placeholder="Write a message…" placeholderTextColor={colors.muted} multiline maxLength={5000} value={draft} onChangeText={handleDraftChange} style={styles.input} returnKeyType="default" textAlignVertical="center" /><Pressable accessibilityRole="button" accessibilityLabel="Send message" disabled={!draft.trim() || sending} onPress={() => void send()} style={({ pressed }) => [styles.send, (!draft.trim() || sending || pressed) && styles.sendDim]}><Text style={styles.sendText}>{sending ? '…' : '↑'}</Text></Pressable></View>
+    <View style={styles.composerArea}>
+    {selectedImage ? (
+      <View style={styles.imagePreview}>
+        <Image source={{ uri: selectedImage }} style={styles.imagePreviewThumb} />
+        <View style={styles.imagePreviewCopy}>
+          <Text style={styles.imagePreviewLabel}>Photo attached</Text>
+          <Text style={styles.imagePreviewHint}>Ready to send</Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Remove attached photo"
+          onPress={() => setSelectedImage(null)}
+          style={styles.imageRemove}
+        >
+          <Text style={styles.imageRemoveText}>×</Text>
+        </Pressable>
+      </View>
+    ) : null}
+    <View style={styles.composer}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Attach a photo"
+        disabled={sending}
+        onPress={() => void chooseImage()}
+        style={({ pressed }) => [styles.attach, (sending || pressed) && styles.sendDim]}
+      >
+        <Text style={styles.attachText}>＋</Text>
+      </Pressable>
+      <TextInput
+        accessibilityLabel="Message"
+        placeholder="Write a message…"
+        placeholderTextColor={colors.muted}
+        multiline
+        maxLength={5000}
+        value={draft}
+        onChangeText={handleDraftChange}
+        style={styles.input}
+        returnKeyType="default"
+        textAlignVertical="center"
+      />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Send message"
+        disabled={(!draft.trim() && !selectedImage) || sending}
+        onPress={() => void send()}
+        style={({ pressed }) => [
+          styles.send,
+          ((!draft.trim() && !selectedImage) || sending || pressed) && styles.sendDim,
+        ]}
+      >
+        <Text style={styles.sendText}>{sending ? '…' : '↑'}</Text>
+      </Pressable>
+    </View>
+  </View>
   </Screen>;
 }
 
@@ -539,4 +660,14 @@ const styles = StyleSheet.create({
   replyComposer: { flexDirection: 'row', alignItems: 'center', gap: 10, borderLeftWidth: 3, borderLeftColor: colors.primary, backgroundColor: colors.surface, paddingHorizontal: 12, paddingVertical: 9, marginTop: 8, borderRadius: 8 },
   replyComposerCopy: { flex: 1, gap: 3 },
   replyCancel: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
-  peer: { flexDirection: 'row', alignItems: 'center', gap: 11, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 16, marginBottom: 8 }, peerCopy: { flex: 1, gap: 4 }, peerName: { color: colors.text, fontWeight: '800', fontSize: 15 }, peerEmail: { color: colors.muted, fontSize: 11 }, typing: { color: colors.primary, fontSize: 12, paddingVertical: 4 }, connectionBanner: { backgroundColor: colors.surface, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8, borderWidth: 1, borderColor: colors.border }, connectionBannerText: { color: colors.muted, fontSize: 12, lineHeight: 17 }, messageList: { paddingVertical: 14, gap: 10 }, loadOlder: { alignSelf: 'center', minHeight: 36, justifyContent: 'center', paddingHorizontal: 12, marginBottom: 8 }, loadOlderText: { color: colors.primary, fontSize: 11, fontWeight: '800' }, emptyList: { flexGrow: 1, justifyContent: 'center' }, messageRow: { flexDirection: 'row', width: '100%' }, outgoingRow: { justifyContent: 'flex-end' }, incomingRow: { justifyContent: 'flex-start' }, bubble: { maxWidth: '84%', paddingHorizontal: 13, paddingTop: 10, paddingBottom: 7, borderRadius: 16, gap: 5 }, outgoingBubble: { backgroundColor: colors.outgoing, borderBottomRightRadius: 5 }, incomingBubble: { backgroundColor: colors.incoming, borderBottomLeftRadius: 5 }, messageText: { color: colors.text, fontSize: 14, lineHeight: 20 }, timestamp: { color: '#D4DAEF', opacity: 0.75, fontSize: 9, alignSelf: 'flex-end' }, readReceipt: { color: '#D4DAEF', fontSize: 9, fontWeight: '800', alignSelf: 'flex-end' }, composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 9, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12, paddingBottom: 3 }, input: { flex: 1, maxHeight: 120, minHeight: 48, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, color: colors.text, fontSize: 14 }, send: { height: 48, width: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary }, sendDim: { opacity: 0.55 }, sendText: { color: colors.background, fontWeight: '900', fontSize: 25, marginTop: -3 }, loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }, loadFailure: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 20 }, helper: { color: colors.muted, fontSize: 13, lineHeight: 19 }, empty: { alignItems: 'center', gap: 8 }, emptyTitle: { color: colors.text, fontWeight: '800', fontSize: 18 } });
+  peer: { flexDirection: 'row', alignItems: 'center', gap: 11, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 16, marginBottom: 8 }, peerCopy: { flex: 1, gap: 4 }, peerName: { color: colors.text, fontWeight: '800', fontSize: 15 }, peerEmail: { color: colors.muted, fontSize: 11 }, typing: { color: colors.primary, fontSize: 12, paddingVertical: 4 }, connectionBanner: { backgroundColor: colors.surface, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8, borderWidth: 1, borderColor: colors.border }, connectionBannerText: { color: colors.muted, fontSize: 12, lineHeight: 17 }, messageList: { paddingVertical: 14, gap: 10 }, loadOlder: { alignSelf: 'center', minHeight: 36, justifyContent: 'center', paddingHorizontal: 12, marginBottom: 8 }, loadOlderText: { color: colors.primary, fontSize: 11, fontWeight: '800' }, emptyList: { flexGrow: 1, justifyContent: 'center' }, messageRow: { flexDirection: 'row', width: '100%' }, outgoingRow: { justifyContent: 'flex-end' }, incomingRow: { justifyContent: 'flex-start' }, bubble: { maxWidth: '84%', paddingHorizontal: 13, paddingTop: 10, paddingBottom: 7, borderRadius: 16, gap: 5 }, outgoingBubble: { backgroundColor: colors.outgoing, borderBottomRightRadius: 5 }, incomingBubble: { backgroundColor: colors.incoming, borderBottomLeftRadius: 5 }, messageImage: { width: 220, height: 220, borderRadius: 10, backgroundColor: colors.surface }, messageText: { color: colors.text, fontSize: 14, lineHeight: 20 }, timestamp: { color: '#D4DAEF', opacity: 0.75, fontSize: 9, alignSelf: 'flex-end' }, readReceipt: { color: '#D4DAEF', fontSize: 9, fontWeight: '800', alignSelf: 'flex-end' }, composerArea: { gap: 9 },
+  imagePreview: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 9, borderRadius: 12, backgroundColor: colors.surface },
+  imagePreviewThumb: { width: 54, height: 54, borderRadius: 8, backgroundColor: colors.border },
+  imagePreviewCopy: { flex: 1, gap: 3 },
+  imagePreviewLabel: { color: colors.text, fontSize: 13, fontWeight: '800' },
+  imagePreviewHint: { color: colors.muted, fontSize: 11 },
+  imageRemove: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.border },
+  imageRemoveText: { color: colors.text, fontSize: 22, fontWeight: '700' },
+  attach: { height: 48, width: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  attachText: { color: colors.primary, fontSize: 27, fontWeight: '600', marginTop: -3 },
+  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 9, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12, paddingBottom: 3 }, input: { flex: 1, maxHeight: 120, minHeight: 48, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, color: colors.text, fontSize: 14 }, send: { height: 48, width: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary }, sendDim: { opacity: 0.55 }, sendText: { color: colors.background, fontWeight: '900', fontSize: 25, marginTop: -3 }, loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }, loadFailure: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 20 }, helper: { color: colors.muted, fontSize: 13, lineHeight: 19 }, empty: { alignItems: 'center', gap: 8 }, emptyTitle: { color: colors.text, fontWeight: '800', fontSize: 18 } });

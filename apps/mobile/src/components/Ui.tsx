@@ -1,5 +1,5 @@
 import type { ComponentProps, PropsWithChildren } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import Svg, { G, Path, Rect } from 'react-native-svg';
 import { colors } from '../theme/colors';
 
@@ -45,9 +45,22 @@ export function ErrorText({ children }: PropsWithChildren) {
   return <Text accessibilityRole="alert" style={styles.error}>{children}</Text>;
 }
 
-export function Avatar({ name, size = 46 }: { name?: string; size?: number }) {
+export function Avatar({ name, size = 46, profilePic }: { name?: string; size?: number; profilePic?: string | null }) {
   const initials = (name || 'R').trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
-  return <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}><Text style={[styles.avatarText, { fontSize: size * 0.34 }]}>{initials || 'R'}</Text></View>;
+  return (
+    <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, overflow: 'hidden' }]}>
+      {profilePic ? (
+        <Image
+          source={{ uri: profilePic }}
+          accessibilityLabel={`${name || 'User'} profile photo`}
+          resizeMode="cover"
+          style={{ width: size, height: size }}
+        />
+      ) : (
+        <Text style={[styles.avatarText, { fontSize: size * 0.34 }]}>{initials || 'R'}</Text>
+      )}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
