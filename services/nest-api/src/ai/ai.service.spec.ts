@@ -60,9 +60,9 @@ describe('AIService', () => {
   });
 
   it('fails when AI integration is not configured', async () => {
-    await expect(
-      createService({}).getStatus(),
-    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    await expect(createService({}).getStatus()).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
   });
 
   it('handles an unreachable Python AI service', async () => {
@@ -71,22 +71,24 @@ describe('AIService', () => {
       vi.fn().mockRejectedValue(new Error('connection refused')),
     );
 
-    await expect(
-      createService().getStatus(),
-    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    await expect(createService().getStatus()).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
   });
 
   it('does not expose Python AI error details', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        new Response('sensitive internal error', { status: 401 }),
-      ),
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response('sensitive internal error', { status: 401 }),
+        ),
     );
 
-    await expect(
-      createService().getStatus(),
-    ).rejects.toBeInstanceOf(BadGatewayException);
+    await expect(createService().getStatus()).rejects.toBeInstanceOf(
+      BadGatewayException,
+    );
   });
 
   it('rejects malformed status responses', async () => {
@@ -99,9 +101,9 @@ describe('AIService', () => {
       ),
     );
 
-    await expect(
-      createService().getStatus(),
-    ).rejects.toBeInstanceOf(BadGatewayException);
+    await expect(createService().getStatus()).rejects.toBeInstanceOf(
+      BadGatewayException,
+    );
   });
 });
 
@@ -141,9 +143,9 @@ describe('AIService conversation analysis', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(createService().analyzeConversation(messages)).resolves.toEqual(
-      payload,
-    );
+    await expect(
+      createService().analyzeConversation(messages),
+    ).resolves.toEqual(payload);
 
     expect(fetchMock.mock.calls[0][0].toString()).toBe(
       'http://127.0.0.1:8000/v1/conversations/analyze',
@@ -197,13 +199,175 @@ describe('AIService conversation analysis', () => {
   it('sanitizes unsuccessful Python responses', async () => {
     vi.stubGlobal(
       'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response('sensitive model output', { status: 502 }),
+        ),
+    );
+
+    await expect(createService().analyzeConversation(messages)).rejects.toThrow(
+      'AI service could not analyze this conversation.',
+    );
+  });
+});
+
+// Tenant-scoped Knowledge Base retrieval.
+describe('AIService knowledge-base answers', () => {
+  const config = {
+    PYTHON_AI_BASE_URL: 'http://127.0.0.1:8000',
+    PYTHON_AI_INTERNAL_TOKEN: 'test-internal-token',
+  };
+
+  const userId = '507f1f77bcf86cd799439011';
+
+  const citation = {
+    chunk_id: '11111111-1111-4111-8111-111111111111',
+    document_id: '22222222-2222-4222-8222-222222222222',
+    title: 'Cedar Grove Workshop Guide',
+    content: 'The workshop closes at 7 PM on Thursdays.',
+    source_uri: 'https://example.test/workshop-guide',
+    chunk_index: 0,
+    start: 0,
+    end: 43,
+  };
+
+  const answerPayload = {
+    answer: 'The workshop closes at 7 PM on Thursdays.',
+    citations: [citation],
+  };
+
+  function createService(values: Record<string, string | undefined> = config) {
+    const configService = {
+      get: (key: string) => values[key],
+    } as unknown as ConfigService;
+
+    return new AIService(configService);
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sends the question and authenticated tenant ID to the Python RAG endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(answerPayload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await createService().answerQuestion(
+      '  When does the workshop close on Thursday?  ',
+      5,
+      userId,
+    );
+
+    expect(result).toEqual(answerPayload);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    const [url, options] = fetchMock.mock.calls[0];
+
+    expect(url.toString()).toBe('http://127.0.0.1:8000/v1/documents/answer');
+    expect(options.method).toBe('POST');
+    expect(options.headers.Authorization).toBe('Bearer test-internal-token');
+    expect(options.headers['X-Relay-User-Id']).toBe(userId);
+    expect(JSON.parse(options.body)).toEqual({
+      question: 'When does the workshop close on Thursday?',
+      top_k: 5,
+    });
+  });
+
+  it('returns normalized answers and citations', async () => {
+    vi.stubGlobal(
+      'fetch',
       vi.fn().mockResolvedValue(
-        new Response('sensitive model output', { status: 502 }),
+        new Response(
+          JSON.stringify({
+            answer: '  The workshop closes at 7 PM.  ',
+            citations: [citation],
+          }),
+          { status: 200 },
+        ),
       ),
     );
 
     await expect(
-      createService().analyzeConversation(messages),
-    ).rejects.toThrow('AI service could not analyze this conversation.');
+      createService().answerQuestion('Closing time?', 3, userId),
+    ).resolves.toEqual({
+      answer: 'The workshop closes at 7 PM.',
+      citations: [citation],
+    });
+  });
+
+  it('rejects invalid questions and tenant IDs before calling Python', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = createService();
+
+    await expect(
+      service.answerQuestion('   ', 5, userId),
+    ).rejects.toBeInstanceOf(BadGatewayException);
+
+    await expect(
+      service.answerQuestion('Question?', 0, userId),
+    ).rejects.toBeInstanceOf(BadGatewayException);
+
+    await expect(
+      service.answerQuestion('Question?', 5, '  '),
+    ).rejects.toBeInstanceOf(BadGatewayException);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed citations without exposing Python response data', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            answer: 'The workshop closes at 7 PM.',
+            citations: [{ ...citation, chunk_index: 'invalid' }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    await expect(
+      createService().answerQuestion('Closing time?', 5, userId),
+    ).rejects.toThrow(
+      'Knowledge-base AI service returned an invalid response.',
+    );
+  });
+
+  it('sanitizes unsuccessful Python responses', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response('sensitive internal model output', { status: 502 }),
+        ),
+    );
+
+    await expect(
+      createService().answerQuestion('Closing time?', 5, userId),
+    ).rejects.toThrow(
+      'Knowledge-base AI service could not answer this question.',
+    );
+  });
+
+  it('handles an unreachable Python RAG service', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new Error('connection refused')),
+    );
+
+    await expect(
+      createService().answerQuestion('Closing time?', 5, userId),
+    ).rejects.toThrow('Knowledge-base AI service is unavailable.');
   });
 });

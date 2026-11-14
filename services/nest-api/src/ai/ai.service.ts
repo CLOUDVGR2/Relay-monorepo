@@ -13,6 +13,22 @@ export interface AIStatusResponse {
   configured: boolean;
 }
 
+export interface KnowledgeBaseCitation {
+  chunk_id: string;
+  document_id: string;
+  title: string;
+  content: string;
+  source_uri: string | null;
+  chunk_index: number;
+  start: number | null;
+  end: number | null;
+}
+
+export interface KnowledgeBaseAnswerResponse {
+  answer: string;
+  citations: KnowledgeBaseCitation[];
+}
+
 // Keep the model response typed and limited to the fields the application uses.
 export interface ConversationAnalysisResponse {
   summary: string;
@@ -33,7 +49,6 @@ export interface ConversationAnalysisMessage {
 @Injectable()
 export class AIService {
   constructor(private readonly configService: ConfigService) {}
-
 
   async analyzeConversation(
     messages: ConversationAnalysisMessage[],
@@ -77,19 +92,16 @@ export class AIService {
     let response: Response;
 
     try {
-      response = await fetch(
-        new URL('/v1/conversations/analyze', baseUrl),
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
-          body: JSON.stringify({ messages }),
-          signal: AbortSignal.timeout(45000),
+      response = await fetch(new URL('/v1/conversations/analyze', baseUrl), {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
         },
-      );
+        body: JSON.stringify({ messages }),
+        signal: AbortSignal.timeout(45000),
+      });
     } catch {
       throw new ServiceUnavailableException('AI service is unavailable.');
     }
@@ -144,8 +156,7 @@ export class AIService {
             (typeof item.owner === 'string' && item.owner.length <= 200)) &&
           'due_date' in item &&
           (item.due_date === null ||
-            (typeof item.due_date === 'string' &&
-              item.due_date.length <= 100)),
+            (typeof item.due_date === 'string' && item.due_date.length <= 100)),
       )
     ) {
       throw new BadGatewayException(
@@ -160,6 +171,135 @@ export class AIService {
         task: item.task.trim(),
         owner: item.owner,
         due_date: item.due_date,
+      })),
+    };
+  }
+
+  async answerQuestion(
+    question: string,
+    topK: number,
+    userId: string,
+  ): Promise<KnowledgeBaseAnswerResponse> {
+    const normalizedQuestion = question.trim();
+
+    if (
+      !normalizedQuestion ||
+      normalizedQuestion.length > 2000 ||
+      !Number.isInteger(topK) ||
+      topK < 1 ||
+      topK > 20 ||
+      !userId.trim()
+    ) {
+      throw new BadGatewayException(
+        'Knowledge-base question is outside the supported limits.',
+      );
+    }
+
+    const baseUrl = this.configService
+      .get<string>('PYTHON_AI_BASE_URL')
+      ?.trim();
+
+    const token = this.configService
+      .get<string>('PYTHON_AI_INTERNAL_TOKEN')
+      ?.trim();
+
+    if (!baseUrl || !token) {
+      throw new ServiceUnavailableException(
+        'AI service integration is not configured.',
+      );
+    }
+
+    let response: Response;
+
+    try {
+      response = await fetch(new URL('/v1/documents/answer', baseUrl), {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'X-Relay-User-Id': userId,
+        },
+        body: JSON.stringify({
+          question: normalizedQuestion,
+          top_k: topK,
+        }),
+        signal: AbortSignal.timeout(60000),
+      });
+    } catch {
+      throw new ServiceUnavailableException(
+        'Knowledge-base AI service is unavailable.',
+      );
+    }
+
+    if (!response.ok) {
+      throw new BadGatewayException(
+        'Knowledge-base AI service could not answer this question.',
+      );
+    }
+
+    let data: unknown;
+
+    try {
+      data = await response.json();
+    } catch {
+      throw new BadGatewayException(
+        'Knowledge-base AI service returned an invalid response.',
+      );
+    }
+
+    if (
+      typeof data !== 'object' ||
+      data === null ||
+      !('answer' in data) ||
+      typeof data.answer !== 'string' ||
+      !data.answer.trim() ||
+      !('citations' in data) ||
+      !Array.isArray(data.citations) ||
+      data.citations.length > 20 ||
+      !data.citations.every(
+        (citation) =>
+          typeof citation === 'object' &&
+          citation !== null &&
+          'chunk_id' in citation &&
+          typeof citation.chunk_id === 'string' &&
+          'document_id' in citation &&
+          typeof citation.document_id === 'string' &&
+          'title' in citation &&
+          typeof citation.title === 'string' &&
+          'content' in citation &&
+          typeof citation.content === 'string' &&
+          'source_uri' in citation &&
+          (citation.source_uri === null ||
+            typeof citation.source_uri === 'string') &&
+          'chunk_index' in citation &&
+          Number.isInteger(citation.chunk_index) &&
+          'start' in citation &&
+          (citation.start === null ||
+            (typeof citation.start === 'number' &&
+              Number.isInteger(citation.start))) &&
+          'end' in citation &&
+          (citation.end === null ||
+            (typeof citation.end === 'number' &&
+              Number.isInteger(citation.end))),
+      )
+    ) {
+      throw new BadGatewayException(
+        'Knowledge-base AI service returned an invalid response.',
+      );
+    }
+
+    return {
+      answer: data.answer.trim(),
+      citations: data.citations.map((citation) => ({
+        chunk_id: citation.chunk_id,
+        document_id: citation.document_id,
+        title: citation.title,
+        content: citation.content,
+        source_uri: citation.source_uri,
+        chunk_index: citation.chunk_index,
+        start: citation.start,
+        end: citation.end,
       })),
     };
   }
@@ -182,21 +322,16 @@ export class AIService {
     let response: Response;
 
     try {
-      response = await fetch(
-        new URL('/v1/ai/status', baseUrl),
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: 'application/json',
-          },
-          signal: AbortSignal.timeout(5000),
+      response = await fetch(new URL('/v1/ai/status', baseUrl), {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
         },
-      );
+        signal: AbortSignal.timeout(5000),
+      });
     } catch {
-      throw new ServiceUnavailableException(
-        'AI service is unavailable.',
-      );
+      throw new ServiceUnavailableException('AI service is unavailable.');
     }
 
     if (!response.ok) {
@@ -210,9 +345,7 @@ export class AIService {
     try {
       data = await response.json();
     } catch {
-      throw new BadGatewayException(
-        'AI service returned an invalid response.',
-      );
+      throw new BadGatewayException('AI service returned an invalid response.');
     }
 
     if (
@@ -225,9 +358,7 @@ export class AIService {
       !('configured' in data) ||
       typeof data.configured !== 'boolean'
     ) {
-      throw new BadGatewayException(
-        'AI service returned an invalid response.',
-      );
+      throw new BadGatewayException('AI service returned an invalid response.');
     }
 
     return {
