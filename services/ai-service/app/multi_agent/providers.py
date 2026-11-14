@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 MAX_PROVIDER_INPUT_CHARS = 24_000
 MAX_PROVIDER_OUTPUT_CHARS = 8_000
 MAX_PROVIDER_OUTPUT_TOKENS = 1_800
-MAX_PROVIDER_REVIEW_OUTPUT_TOKENS = 900
+MAX_PROVIDER_REVIEW_OUTPUT_TOKENS = 1800
 
 
 class MultiAgentProviderError(RuntimeError):
@@ -170,6 +170,23 @@ class LiteLLMMultiAgentProvider:
 
             response = await acompletion(**kwargs)
             choices = self._field(response, "choices", [])
+
+            finish_reason = (
+                self._field(choices[0], "finish_reason", "unknown")
+                if choices else "no_choices"
+            )
+            logger.info(
+                "Multi-agent provider response metadata "
+                "operation=%s finish_reason=%s",
+                operation,
+                finish_reason,
+            )
+
+            if finish_reason == "length":
+                raise MultiAgentProviderError(
+                    "Multi-agent provider response reached its output token limit"
+                )
+
             if not choices:
                 raise MultiAgentProviderError("Multi-agent provider returned no choices")
 
@@ -469,8 +486,12 @@ class LiteLLMMultiAgentProvider:
                     "important findings, severity or priority, concrete file "
                     "paths, and actionable code-level recommendations. "
                     "Remove repetition and low-value commentary. "
-                    "Keep final_answer concise and information-dense, normally "
-                    "under 5,000 characters. "
+                    "Keep final_answer concise and information-dense, "
+                    "under 1,500 characters. Use short paragraphs or bullets. "
+                    "Preserve essential findings, file paths, and actions only. "
+                    "Keep feedback under 160 characters. Do not repeat the "
+                    "prompt, explain your review process, or add an introduction. "
+                    "Return compact JSON without markdown code fences. "
                     "Set approved=false if the outputs do not contain a useful "
                     "answer. If approved, final_answer must contain the "
                     "consolidated answer. Keep feedback brief. "
@@ -491,7 +512,7 @@ class LiteLLMMultiAgentProvider:
         content = await self._complete(
             operation="review",
             messages=messages,
-            response_format=ReviewResult,
+            response_format={"type": "json_object"},
             max_tokens=MAX_PROVIDER_REVIEW_OUTPUT_TOKENS,
         )
         return self._parse_structured(content, ReviewResult, operation="review")

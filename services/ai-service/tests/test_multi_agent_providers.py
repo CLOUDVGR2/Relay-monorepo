@@ -399,7 +399,7 @@ async def test_litellm_review_validates_schema(monkeypatch):
     import app.multi_agent.providers as module
 
     async def fake_acompletion(**kwargs):
-        assert kwargs["response_format"] is ReviewResult
+        assert kwargs["response_format"] == {"type": "json_object"}
         assert kwargs["max_tokens"] == module.MAX_PROVIDER_REVIEW_OUTPUT_TOKENS
         return fake_response(
             json.dumps(
