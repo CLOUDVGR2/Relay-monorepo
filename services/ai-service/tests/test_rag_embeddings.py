@@ -96,6 +96,7 @@ async def test_non_string_input_is_rejected():
 
 
 def test_embedding_factory_selects_litellm(monkeypatch):
+    monkeypatch.delenv("EMBEDDING_PROVIDER", raising=False)
     monkeypatch.setenv("AI_PROVIDER", "litellm")
     assert isinstance(
         embeddings.get_embedding_client(),
@@ -229,3 +230,29 @@ def test_litellm_invalid_configuration_is_rejected():
 
     with pytest.raises(ValueError):
         LiteLLMEmbeddingClient(dimensions=768.5)
+
+def test_embedding_factory_selects_ollama_independently(monkeypatch):
+    monkeypatch.setenv("AI_PROVIDER", "litellm")
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "ollama")
+
+    assert isinstance(
+        embeddings.get_embedding_client(),
+        OllamaEmbeddingClient,
+    )
+
+
+def test_embedding_factory_selects_litellm_when_explicit(monkeypatch):
+    monkeypatch.setenv("AI_PROVIDER", "mock")
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "litellm")
+
+    assert isinstance(
+        embeddings.get_embedding_client(),
+        LiteLLMEmbeddingClient,
+    )
+
+
+def test_embedding_factory_rejects_unknown_embedding_provider(monkeypatch):
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "unknown")
+
+    with pytest.raises(ValueError, match="EMBEDDING_PROVIDER"):
+        embeddings.get_embedding_client()

@@ -179,7 +179,17 @@ class LiteLLMEmbeddingClient:
 
 
 def get_embedding_client():
-    """Select the RAG embedding provider from AI_PROVIDER."""
+    """Select the RAG embedding provider independently from chat generation."""
+    provider = os.getenv("EMBEDDING_PROVIDER", "").strip().lower()
+
+    if provider == "ollama":
+        return OllamaEmbeddingClient()
+    if provider == "litellm":
+        return LiteLLMEmbeddingClient()
+    if provider:
+        raise ValueError("EMBEDDING_PROVIDER must be either 'ollama' or 'litellm'")
+
+    # Preserve the existing behavior when no embedding provider is configured.
     if os.getenv("AI_PROVIDER", "mock").strip().lower() == "litellm":
         return LiteLLMEmbeddingClient()
     return OllamaEmbeddingClient()
