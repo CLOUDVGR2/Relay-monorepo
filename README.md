@@ -96,7 +96,7 @@ Design and implementation of cloud-oriented infrastructure and deployment capabi
 - Infrastructure provisioning, environment separation, and deployment automation.
 - Cloud resource management, resilience, security boundaries, and operational cost considerations.
 
-### 8. Observability Engineering, SRE and Production Operations
+### 8. Observability Engineering, Site Reliability Engineering and Production Operations
 
 Engineering operational visibility and reliability practices across the distributed platform, including:
 
