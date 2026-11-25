@@ -14,7 +14,7 @@ COPY . .
 
 RUN pnpm --filter @relay/web run build
 
-FROM nginx:1.28-alpine AS runtime
+FROM nginx:1.29-alpine AS runtime
 
 RUN sed -i 's#^pid .*;#pid /tmp/nginx.pid;#' /etc/nginx/nginx.conf \
  && mkdir -p \
