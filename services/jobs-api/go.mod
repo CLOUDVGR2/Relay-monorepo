@@ -6,7 +6,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/gin-gonic/gin v1.10.0
 	github.com/prometheus/client_golang v1.23.2
-	github.com/rabbitmq/amqp091-go v1.15.0
+	github.com/rabbitmq/amqp091-go v1.17.0
 	github.com/redis/go-redis/v9 v9.23.0
 )
 
